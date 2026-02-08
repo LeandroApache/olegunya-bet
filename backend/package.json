@@ -6,10 +6,9 @@
   "private": true,
   "license": "UNLICENSED",
   "scripts": {
-    "prisma:generate": "DATABASE_URL=\"postgresql://dummy:dummy@dummy:5432/dummy\" prisma generate --schema=./prisma/schema.prisma",
+    "prisma:generate": "PRISMA_SKIP_ENV_VALIDATION=1 DATABASE_URL=\"postgresql://dummy:dummy@dummy:5432/dummy\" prisma generate --schema=./prisma/schema.prisma",
     "postinstall": "npm run prisma:generate",
-    "prebuild": "npm run prisma:generate && test -f generated/prisma/index.d.ts || (echo 'ERROR: Prisma client not generated!' && exit 1)",
-    "build": "nest build && npm run copy:prisma",
+    "build": "npm run prisma:generate && test -f generated/prisma/index.d.ts || (echo 'ERROR: Prisma client not generated! Files:' && ls -la generated/ 2>&1 || echo 'generated folder does not exist' && exit 1) && nest build && npm run copy:prisma",
     "copy:prisma": "test -d generated && cp -r generated dist/ || (echo 'ERROR: generated folder not found!' && exit 1)",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "start": "nest start",
