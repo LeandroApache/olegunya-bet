@@ -1,0 +1,201 @@
+generator client {
+  provider   = "prisma-client-js"
+  engineType = "binary"
+  output     = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum SportKey {
+  FOOTBALL
+  HOCKEY
+}
+
+enum MarketType {
+  MATCH_1X2_REGULAR_TIME
+}
+
+/**
+ * =======================
+ * AUTH
+ * =======================
+ */
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+/**
+ * =======================
+ * CORE STRUCTURE
+ * =======================
+ */
+model Sport {
+  id   String   @id @default(cuid())
+  key  SportKey @unique
+  name String
+
+  leagues League[]
+}
+
+model League {
+  id        String   @id @default(cuid())
+  sportId   String
+  name      String
+  country   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sport   Sport    @relation(fields: [sportId], references: [id])
+  seasons Season[]
+
+  @@unique([sportId, name])
+}
+
+model Season {
+  id                String @id @default(cuid())
+  leagueId          String
+  name              String // "2025/26"
+  baseCoefHomeEqual Float // ключевой параметр модели
+  flipCoef Float
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  league            League             @relation(fields: [leagueId], references: [id])
+  teams             Team[]
+  tours             Tour[]
+  matches           Match[]
+  strengthSnapshots StrengthSnapshot[]
+
+  @@unique([leagueId, name])
+}
+
+model Team {
+  id       String   @id @default(cuid())
+  seasonId String
+  name     String
+  aliases  String[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  season Season @relation(fields: [seasonId], references: [id])
+
+  homeMatches Match[] @relation("homeTeam")
+  awayMatches Match[] @relation("awayTeam")
+
+  strengthValues StrengthValue[]
+
+  @@unique([seasonId, name])
+}
+
+model Tour {
+  id        String   @id @default(cuid())
+  seasonId  String
+  number    Int?
+  name      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  season  Season  @relation(fields: [seasonId], references: [id])
+  matches Match[]
+
+  @@index([seasonId])
+  @@index([seasonId, number])
+}
+
+/**
+ * =======================
+ * MATCHES
+ * =======================
+ */
+model Match {
+  id         String     @id @default(cuid())
+  seasonId   String
+  tourId     String?
+  date       DateTime
+  marketType MarketType @default(MATCH_1X2_REGULAR_TIME)
+
+  homeTeamId String
+  awayTeamId String
+
+  kHome Float
+  kDraw Float
+  kAway Float
+
+  total Float?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  season Season @relation(fields: [seasonId], references: [id])
+  tour   Tour?  @relation(fields: [tourId], references: [id])
+
+  homeTeam Team @relation("homeTeam", fields: [homeTeamId], references: [id])
+  awayTeam Team @relation("awayTeam", fields: [awayTeamId], references: [id])
+
+  computed MatchComputed?
+
+  @@unique([seasonId, date, homeTeamId, awayTeamId, marketType])
+  @@index([seasonId, date])
+}
+
+model MatchComputed {
+  matchId String @id
+
+  baseProbUsed Float
+
+  // было: pHomeFair/pDrawFair/pAwayFair
+  pHomeImplied Float
+  pDrawImplied Float
+  pAwayImplied Float
+
+  deltaHome Float
+  deltaAway Float
+
+  createdAt DateTime @default(now())
+
+  match Match @relation(fields: [matchId], references: [id])
+}
+
+/**
+ * =======================
+ * STRENGTH CALCULATION
+ * =======================
+ */
+model StrengthSnapshot {
+  id       String @id @default(cuid())
+  seasonId String
+
+  fromDate DateTime?
+  toDate   DateTime?
+
+  weightMode   String
+  halfLifeDays Int?
+
+  createdAt DateTime @default(now())
+
+  season Season          @relation(fields: [seasonId], references: [id])
+  values StrengthValue[]
+
+  @@index([seasonId, createdAt])
+}
+
+model StrengthValue {
+  id         String @id @default(cuid())
+  snapshotId String
+  teamId     String
+  strength   Float
+
+  snapshot StrengthSnapshot @relation(fields: [snapshotId], references: [id])
+  team     Team             @relation(fields: [teamId], references: [id])
+
+  @@unique([snapshotId, teamId])
+  @@index([teamId])
+}

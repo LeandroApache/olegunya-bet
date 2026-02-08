@@ -1,0 +1,245 @@
+# ------------------------------------------------------
+# THIS FILE WAS AUTOMATICALLY GENERATED (DO NOT MODIFY)
+# ------------------------------------------------------
+
+type AuthTokens {
+  accessToken: String!
+}
+
+input BootstrapUserInput {
+  email: String!
+  password: String!
+}
+
+input CalculateOddsFromStrengthInput {
+  awayTeamId: ID!
+  homeTeamId: ID!
+  snapshotId: ID!
+}
+
+input CreateLeagueInput {
+  country: String
+  name: String!
+  sportKey: SportKey!
+}
+
+input CreateMatchInput {
+  awayTeamId: ID!
+  date: String!
+  homeTeamId: ID!
+  kAway: Float!
+  kDraw: Float!
+  kHome: Float!
+  marketType: MarketType
+  seasonId: ID!
+  total: Float
+  tourId: ID
+}
+
+input CreateSeasonInput {
+  baseCoefHomeEqual: Float!
+  flipCoef: Float!
+  leagueId: ID!
+  name: String!
+}
+
+input CreateStrengthSnapshotInput {
+  fromDate: String
+  halfLifeDays: Float
+  seasonId: ID!
+  toDate: String
+}
+
+input CreateTeamInput {
+  aliases: [String!]
+  name: String!
+  seasonId: ID!
+}
+
+"""
+A date-time string at UTC, such as 2019-12-03T09:54:33Z, compliant with the date-time format.
+"""
+scalar DateTime
+
+type LeagueGql {
+  country: String
+  createdAt: DateTime!
+  id: ID!
+  name: String!
+  sportKey: SportKey!
+  updatedAt: DateTime!
+}
+
+input LoginInput {
+  email: String!
+  password: String!
+}
+
+enum MarketType {
+  MATCH_1X2_REGULAR_TIME
+}
+
+type MatchComputedGql {
+  baseProbUsed: Float!
+  deltaAway: Float!
+  deltaHome: Float!
+  pAwayImplied: Float!
+  pDrawImplied: Float!
+  pHomeImplied: Float!
+}
+
+type MatchGql {
+  awayTeamId: ID!
+  awayTeamName: String!
+  computed: MatchComputedGql
+  createdAt: DateTime!
+  date: DateTime!
+  homeTeamId: ID!
+  homeTeamName: String!
+  id: ID!
+  kAway: Float!
+  kDraw: Float!
+  kHome: Float!
+  marketType: MarketType!
+  seasonId: ID!
+  total: Float
+  tourId: ID
+  updatedAt: DateTime!
+}
+
+type MatchesPageGql {
+  matches: [MatchGql!]!
+  page: Float!
+  pageSize: Float!
+  totalCount: Float!
+  totalPages: Float!
+}
+
+type Me {
+  email: String!
+  id: String!
+}
+
+type Mutation {
+  bootstrapUser(input: BootstrapUserInput!): AuthTokens!
+  createLeague(input: CreateLeagueInput!): LeagueGql!
+  createMatch(input: CreateMatchInput!): MatchGql!
+  createSeason(input: CreateSeasonInput!): SeasonGql!
+  createStrengthSnapshot(input: CreateStrengthSnapshotInput!): StrengthSnapshotGql!
+  createTeam(input: CreateTeamInput!): TeamGql!
+  deleteLeague(id: ID!): Boolean!
+  deleteMatch(id: ID!): Boolean!
+  deleteSeason(id: ID!): Boolean!
+  deleteTeam(id: ID!): Boolean!
+  login(input: LoginInput!): AuthTokens!
+  updateLeague(input: UpdateLeagueInput!): LeagueGql!
+  updateMatch(input: UpdateMatchInput!): MatchGql!
+  updateSeason(input: UpdateSeasonInput!): SeasonGql!
+  updateTeam(input: UpdateTeamInput!): TeamGql!
+}
+
+type OddsFromStrengthGql {
+  coefficient: Float!
+  delta: Float!
+  impliedProbability: Float!
+  isHomeTeam: Boolean!
+  teamName: String!
+}
+
+type Query {
+  calculateOddsFromStrength(input: CalculateOddsFromStrengthInput!): OddsFromStrengthGql!
+  findTeam(query: String!, seasonId: ID!): TeamGql
+  league(id: ID!): LeagueGql!
+  leagues(sportKey: SportKey): [LeagueGql!]!
+  match(id: ID!): MatchGql!
+  matches(seasonId: ID!): [MatchGql!]!
+  matchesPaginated(page: Int = 1, pageSize: Int = 20, seasonId: ID!): MatchesPageGql!
+  me: Me!
+  season(id: ID!): SeasonGql!
+  seasons(leagueId: ID!): [SeasonGql!]!
+  sports: [SportGql!]!
+  strengthSnapshot(id: ID!): StrengthSnapshotGql!
+  team(id: ID!): TeamGql!
+  teams(seasonId: ID!): [TeamGql!]!
+}
+
+type SeasonGql {
+  baseCoefHomeEqual: Float!
+  createdAt: DateTime!
+  flipCoef: Float!
+  id: ID!
+  leagueId: ID!
+  leagueName: String!
+  name: String!
+  updatedAt: DateTime!
+}
+
+type SportGql {
+  id: ID!
+  key: SportKey!
+  name: String!
+}
+
+enum SportKey {
+  FOOTBALL
+  HOCKEY
+}
+
+type StrengthSnapshotGql {
+  createdAt: DateTime!
+  fromDate: DateTime
+  halfLifeDays: Float
+  id: ID!
+  seasonId: ID!
+  toDate: DateTime
+  values: [StrengthValueGql!]!
+  weightMode: String!
+}
+
+type StrengthValueGql {
+  strength: Float!
+  teamId: ID!
+  teamName: String!
+}
+
+type TeamGql {
+  aliases: [String!]!
+  createdAt: DateTime!
+  id: ID!
+  name: String!
+  seasonId: ID!
+  seasonName: String!
+  updatedAt: DateTime!
+}
+
+input UpdateLeagueInput {
+  country: String
+  id: String!
+  name: String
+  sportKey: SportKey
+}
+
+input UpdateMatchInput {
+  awayTeamId: ID
+  date: String
+  homeTeamId: ID
+  id: ID!
+  kAway: Float
+  kDraw: Float
+  kHome: Float
+  total: Float
+  tourId: ID
+}
+
+input UpdateSeasonInput {
+  baseCoefHomeEqual: Float
+  flipCoef: Float
+  id: ID!
+  name: String
+}
+
+input UpdateTeamInput {
+  aliases: [String!]
+  id: ID!
+  name: String
+}
