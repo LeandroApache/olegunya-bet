@@ -1,0 +1,6 @@
+[     401ms] [WARNING]  %cZoneResolverFactory %c[create:sport_menu_banner] color:rgb(150,72,60); color:unset; error "Container element with id zone-sport_menu_banner not found" @ https://www.oddsportal.com/build/assets/app-Bs2BAqGe.js:1341
+[     402ms] [WARNING]  %cZoneResolverFactory %c[create:sport_menu_banner] color:rgb(150,72,60); color:unset; fallback to BasicZoneResolver @ https://www.oddsportal.com/build/assets/app-Bs2BAqGe.js:1341
+[     402ms] [WARNING]  %cZoneResolverFactory %c[create:soccer_sport_menu_banner] color:rgb(150,72,60); color:unset; error "Container element with id zone-soccer_sport_menu_banner not found" @ https://www.oddsportal.com/build/assets/app-Bs2BAqGe.js:1341
+[     402ms] [WARNING]  %cZoneResolverFactory %c[create:soccer_sport_menu_banner] color:rgb(150,72,60); color:unset; fallback to BasicZoneResolver @ https://www.oddsportal.com/build/assets/app-Bs2BAqGe.js:1341
+[     402ms] [WARNING]  %cZoneResolverFactory %c[create:desktop_bottom_banner] color:rgb(150,72,60); color:unset; error "Container element with id zone-desktop_bottom_banner not found" @ https://www.oddsportal.com/build/assets/app-Bs2BAqGe.js:1341
+[     403ms] [WARNING]  %cZoneResolverFactory %c[create:desktop_bottom_banner] color:rgb(150,72,60); color:unset; fallback to BasicZoneResolver @ https://www.oddsportal.com/build/assets/app-Bs2BAqGe.js:1341
