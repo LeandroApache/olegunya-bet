@@ -19,6 +19,11 @@
     "forceConsistentCasingInFileNames": true,
     "noImplicitAny": false,
     "strictBindCallApply": false,
-    "noFallthroughCasesInSwitch": false
+    "noFallthroughCasesInSwitch": false,
+    "paths": {
+      "../../generated/prisma": ["./generated/prisma"],
+      "../../../generated/prisma": ["./generated/prisma"],
+      "*": ["./node_modules/*", "./generated/*"]
+    }
   }
 }
