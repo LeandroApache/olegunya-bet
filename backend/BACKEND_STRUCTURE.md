@@ -89,3 +89,13 @@ backend/
 - **PostgreSQL** - база данных
 - **JWT** - аутентификация
 - **TypeScript** - язык программирования
+
+## Деплой (Railway)
+
+При каждом старте контейнера применяются миграции, затем поднимается приложение:
+
+- **Start Command** (корень сервиса — папка `backend`): `npm run start:railway`
+- Скрипт: `prisma migrate deploy` → `node dist/main`
+- Нужны переменные `DATABASE_URL` и успешный `npm run build` (папка `prisma/migrations` должна попадать в образ/деплой вместе с кодом).
+
+Локально без миграций при старте: `npm run start:prod`.
