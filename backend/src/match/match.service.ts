@@ -5,6 +5,7 @@ import {
     NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { SportKey } from '../../generated/prisma';
 import { CreateMatchInput, UpdateMatchInput } from './dto/match.inputs';
 import { MatchComputedGql, MatchGql, MarketTypeGql, MatchesPageGql } from './dto/match.types';
 
@@ -121,6 +122,85 @@ export class MatchService {
         return { baseProbUsed, deltaHome, deltaAway };
     }
 
+    /**
+     * Derby: после того как «домашняя» сторона линии задана (k_adj или k после шагов для гостя-фаворита),
+     * дельта всегда как у дерби с домашним фаворитом — база дома и pHome из тройки.
+     */
+    private computeDerbyDeltaHomeFavoriteSide(
+        baseCoefHomeEqual: number,
+        implied: ImpliedProbs,
+    ): { baseProbUsed: number; deltaHome: number; deltaAway: number } {
+        if (!isFinite(baseCoefHomeEqual) || baseCoefHomeEqual <= 1) {
+            throw new BadRequestException('Season.baseCoefHomeEqual must be > 1');
+        }
+        if (!isFinite(implied.pHomeImplied) || implied.pHomeImplied <= 0) {
+            throw new BadRequestException('Invalid implied probability for home');
+        }
+        if (!isFinite(implied.pAwayImplied) || implied.pAwayImplied <= 0) {
+            throw new BadRequestException('Invalid implied probability for away');
+        }
+        const baseProbUsed = (1 / baseCoefHomeEqual) * 100;
+        const deltaHome = implied.pHomeImplied * 100 - baseProbUsed;
+        const deltaAway = -deltaHome;
+        return { baseProbUsed, deltaHome, deltaAway };
+    }
+
+    /**
+     * Derby (football):
+     * - Home favorite (kHome <= kAway): kAdj = (kHome - 1) / sqrt(flipCoef) + 1 → implied → дельта как у дерби с дом. фаворитом.
+     * - Away favorite (kAway < kHome): guest→home как обычный матч, но множитель перевёртыша = sqrt(flipCoef)
+     *   (flipAsHome = flipAway × sqrt(flipCoef)); далее implied (kEquiv, kDraw, kAway), сравнение с домашней базой,
+     *   затем знак дельты по дому инвертируется (на поле фаворит — гость, перевод только для расчёта линии).
+     */
+    private computeDerbyImpliedAndDelta(
+        kHome: number,
+        kDraw: number,
+        kAway: number,
+        flipCoef: number,
+        baseCoefHomeEqual: number,
+    ): { implied: ImpliedProbs; baseProbUsed: number; deltaHome: number; deltaAway: number } {
+        if (!isFinite(flipCoef) || flipCoef <= 0) {
+            throw new BadRequestException('Season.flipCoef must be > 0');
+        }
+        if (!isFinite(baseCoefHomeEqual) || baseCoefHomeEqual <= 1) {
+            throw new BadRequestException('Season.baseCoefHomeEqual must be > 1');
+        }
+
+        const sqrtFlip = Math.sqrt(flipCoef);
+        if (!isFinite(sqrtFlip) || sqrtFlip <= 0) {
+            throw new BadRequestException('Invalid sqrt(flipCoef)');
+        }
+
+        // Home favorite or equal on line (tie → home branch)
+        if (kHome <= kAway) {
+            const kAdj = (kHome - 1) / sqrtFlip + 1;
+            if (!isFinite(kAdj) || kAdj <= 1) {
+                throw new BadRequestException('Invalid derby adjusted home odds');
+            }
+            const implied = this.computeImpliedProbsFromOdds(kAdj, kDraw, kAway);
+            const { baseProbUsed, deltaHome, deltaAway } = this.computeDerbyDeltaHomeFavoriteSide(
+                baseCoefHomeEqual,
+                implied,
+            );
+            return { implied, baseProbUsed, deltaHome, deltaAway };
+        }
+
+        // Away favorite: в домашнюю шкалу через sqrt(flipCoef), не через полный flipCoef
+        const flipAway = this.flipFromOdds(kAway);
+        const flipAsHome = flipAway * sqrtFlip;
+        const kHomeEquiv = this.oddsFromFlip(flipAsHome);
+        if (!isFinite(kHomeEquiv) || kHomeEquiv <= 1) {
+            throw new BadRequestException('Invalid derby away-to-home equivalent odds');
+        }
+        const implied = this.computeImpliedProbsFromOdds(kHomeEquiv, kDraw, kAway);
+        const { baseProbUsed, deltaHome: deltaHomeRaw, deltaAway: deltaAwayRaw } =
+            this.computeDerbyDeltaHomeFavoriteSide(baseCoefHomeEqual, implied);
+        // Перевод в домашнюю шкалу только для оценки линии; на поле фаворит — гость → знак дельты по дому обратный.
+        const deltaHome = -deltaHomeRaw;
+        const deltaAway = -deltaAwayRaw;
+        return { implied, baseProbUsed, deltaHome, deltaAway };
+    }
+
     private map(row: any): MatchGql {
         return {
             id: row.id,
@@ -159,7 +239,12 @@ export class MatchService {
 
         const season = await this.prisma.season.findUnique({
             where: { id: input.seasonId },
-            select: { id: true, baseCoefHomeEqual: true, flipCoef: true },
+            include: {
+                league: {
+                    include: { sport: true },
+                },
+                derbyMatches: true,
+            },
         });
         if (!season) throw new NotFoundException('Season not found');
 
@@ -180,22 +265,51 @@ export class MatchService {
             throw new BadRequestException('Teams must belong to the same season as match');
         }
 
-        // ===== Variant A + flip correction =====
-        const kHomeEffective = this.computeEffectiveHomeOddsDirty(
-            input.kHome,
-            input.kAway,
-            season.flipCoef,
-        );
+        const isFootball = season.league.sport.key === SportKey.FOOTBALL;
+        const isDerby =
+            isFootball &&
+            !!season.derbyMatches.find(
+                (d) =>
+                    (d.homeTeamId === input.homeTeamId && d.awayTeamId === input.awayTeamId) ||
+                    (d.homeTeamId === input.awayTeamId && d.awayTeamId === input.homeTeamId),
+            );
 
-        const implied = this.computeImpliedProbsFromOdds(kHomeEffective, input.kDraw, input.kAway);
-        const { baseProbUsed, deltaHome, deltaAway } = this.computeDeltaDirty(
-            season.baseCoefHomeEqual,
-            implied.pHomeImplied,
-            implied.pAwayImplied,
-            season.flipCoef,
-            input.kHome,
-            input.kAway,
-        );
+        let implied: ImpliedProbs;
+        let baseProbUsed: number;
+        let deltaHome: number;
+        let deltaAway: number;
+
+        if (isDerby) {
+            const derbyComputed = this.computeDerbyImpliedAndDelta(
+                input.kHome,
+                input.kDraw,
+                input.kAway,
+                season.flipCoef,
+                season.baseCoefHomeEqual,
+            );
+            implied = derbyComputed.implied;
+            baseProbUsed = derbyComputed.baseProbUsed;
+            deltaHome = derbyComputed.deltaHome;
+            deltaAway = derbyComputed.deltaAway;
+        } else {
+            const kHomeEffective = this.computeEffectiveHomeOddsDirty(
+                input.kHome,
+                input.kAway,
+                season.flipCoef,
+            );
+            implied = this.computeImpliedProbsFromOdds(kHomeEffective, input.kDraw, input.kAway);
+            const dirty = this.computeDeltaDirty(
+                season.baseCoefHomeEqual,
+                implied.pHomeImplied,
+                implied.pAwayImplied,
+                season.flipCoef,
+                input.kHome,
+                input.kAway,
+            );
+            baseProbUsed = dirty.baseProbUsed;
+            deltaHome = dirty.deltaHome;
+            deltaAway = dirty.deltaAway;
+        }
 
         const date = new Date(input.date);
         const marketType = (input.marketType ?? MarketTypeGql.MATCH_1X2_REGULAR_TIME) as any;
@@ -322,7 +436,16 @@ export class MatchService {
     async update(input: UpdateMatchInput): Promise<MatchGql> {
         const existing = await this.prisma.match.findUnique({
             where: { id: input.id },
-            include: { season: true },
+            include: {
+                season: {
+                    include: {
+                        league: {
+                            include: { sport: true },
+                        },
+                        derbyMatches: true,
+                    },
+                },
+            },
         });
         if (!existing) throw new NotFoundException('Match not found');
 
@@ -352,22 +475,51 @@ export class MatchService {
         const kDraw = input.kDraw ?? existing.kDraw;
         const kAway = input.kAway ?? existing.kAway;
 
-        // ===== Variant A + flip correction =====
-        const kHomeEffective = this.computeEffectiveHomeOddsDirty(
-            kHome,
-            kAway,
-            existing.season.flipCoef,
-        );
+        const isFootball = existing.season.league.sport.key === SportKey.FOOTBALL;
+        const isDerby =
+            isFootball &&
+            !!existing.season.derbyMatches.find(
+                (d) =>
+                    (d.homeTeamId === homeTeamId && d.awayTeamId === awayTeamId) ||
+                    (d.homeTeamId === awayTeamId && d.awayTeamId === homeTeamId),
+            );
 
-        const implied = this.computeImpliedProbsFromOdds(kHomeEffective, kDraw, kAway);
-        const { baseProbUsed, deltaHome, deltaAway } = this.computeDeltaDirty(
-            existing.season.baseCoefHomeEqual,
-            implied.pHomeImplied,
-            implied.pAwayImplied,
-            existing.season.flipCoef,
-            kHome,
-            kAway,
-        );
+        let implied: ImpliedProbs;
+        let baseProbUsed: number;
+        let deltaHome: number;
+        let deltaAway: number;
+
+        if (isDerby) {
+            const derbyComputed = this.computeDerbyImpliedAndDelta(
+                kHome,
+                kDraw,
+                kAway,
+                existing.season.flipCoef,
+                existing.season.baseCoefHomeEqual,
+            );
+            implied = derbyComputed.implied;
+            baseProbUsed = derbyComputed.baseProbUsed;
+            deltaHome = derbyComputed.deltaHome;
+            deltaAway = derbyComputed.deltaAway;
+        } else {
+            const kHomeEffective = this.computeEffectiveHomeOddsDirty(
+                kHome,
+                kAway,
+                existing.season.flipCoef,
+            );
+            implied = this.computeImpliedProbsFromOdds(kHomeEffective, kDraw, kAway);
+            const dirty = this.computeDeltaDirty(
+                existing.season.baseCoefHomeEqual,
+                implied.pHomeImplied,
+                implied.pAwayImplied,
+                existing.season.flipCoef,
+                kHome,
+                kAway,
+            );
+            baseProbUsed = dirty.baseProbUsed;
+            deltaHome = dirty.deltaHome;
+            deltaAway = dirty.deltaAway;
+        }
 
         try {
             const updated = await this.prisma.$transaction(async (tx) => {

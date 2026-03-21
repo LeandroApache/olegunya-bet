@@ -17,6 +17,10 @@ enum MarketType {
   MATCH_1X2_REGULAR_TIME
 }
 
+enum DerbyType {
+  DERBY
+}
+
 /**
  * =======================
  * AUTH
@@ -72,6 +76,7 @@ model Season {
   tours             Tour[]
   matches           Match[]
   strengthSnapshots StrengthSnapshot[]
+  derbyMatches      SeasonDerbyMatch[]
 
   @@unique([leagueId, name])
 }
@@ -89,6 +94,9 @@ model Team {
 
   homeMatches Match[] @relation("homeTeam")
   awayMatches Match[] @relation("awayTeam")
+
+  derbyHomeMatches SeasonDerbyMatch[] @relation("derbyHomeTeam")
+  derbyAwayMatches SeasonDerbyMatch[] @relation("derbyAwayTeam")
 
   strengthValues StrengthValue[]
 
@@ -198,4 +206,19 @@ model StrengthValue {
 
   @@unique([snapshotId, teamId])
   @@index([teamId])
+}
+
+model SeasonDerbyMatch {
+  id        String   @id @default(cuid())
+  seasonId  String
+  homeTeamId String
+  awayTeamId String
+  type      DerbyType
+
+  season Season @relation(fields: [seasonId], references: [id])
+  homeTeam Team @relation("derbyHomeTeam", fields: [homeTeamId], references: [id])
+  awayTeam Team @relation("derbyAwayTeam", fields: [awayTeamId], references: [id])
+
+  @@unique([seasonId, homeTeamId, awayTeamId, type])
+  @@index([seasonId])
 }

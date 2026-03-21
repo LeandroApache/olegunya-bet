@@ -15,6 +15,7 @@ import { TeamModule } from './team/team.module';
 import { MatchModule } from './match/match.module';
 import { StrengthModule } from './strength/strength.module';
 import { SportModule } from './sport/sport.module';
+import { DerbyModule } from './derby/derby.module';
 
 
 @Module({
@@ -37,7 +38,8 @@ import { SportModule } from './sport/sport.module';
     TeamModule,
     MatchModule,
     StrengthModule,
-    SportModule
+    SportModule,
+    DerbyModule
   ],
   providers: [
     {

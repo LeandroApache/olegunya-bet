@@ -36,6 +36,13 @@ input CreateMatchInput {
   tourId: ID
 }
 
+input CreateSeasonDerbyMatchInput {
+  awayTeamId: ID!
+  homeTeamId: ID!
+  seasonId: ID!
+  type: DerbyType!
+}
+
 input CreateSeasonInput {
   baseCoefHomeEqual: Float!
   flipCoef: Float!
@@ -60,6 +67,10 @@ input CreateTeamInput {
 A date-time string at UTC, such as 2019-12-03T09:54:33Z, compliant with the date-time format.
 """
 scalar DateTime
+
+enum DerbyType {
+  DERBY
+}
 
 type LeagueGql {
   country: String
@@ -125,16 +136,19 @@ type Mutation {
   createLeague(input: CreateLeagueInput!): LeagueGql!
   createMatch(input: CreateMatchInput!): MatchGql!
   createSeason(input: CreateSeasonInput!): SeasonGql!
+  createSeasonDerbyMatch(input: CreateSeasonDerbyMatchInput!): SeasonDerbyMatchGql!
   createStrengthSnapshot(input: CreateStrengthSnapshotInput!): StrengthSnapshotGql!
   createTeam(input: CreateTeamInput!): TeamGql!
   deleteLeague(id: ID!): Boolean!
   deleteMatch(id: ID!): Boolean!
   deleteSeason(id: ID!): Boolean!
+  deleteSeasonDerbyMatch(id: ID!): Boolean!
   deleteTeam(id: ID!): Boolean!
   login(input: LoginInput!): AuthTokens!
   updateLeague(input: UpdateLeagueInput!): LeagueGql!
   updateMatch(input: UpdateMatchInput!): MatchGql!
   updateSeason(input: UpdateSeasonInput!): SeasonGql!
+  updateSeasonDerbyMatch(input: UpdateSeasonDerbyMatchInput!): SeasonDerbyMatchGql!
   updateTeam(input: UpdateTeamInput!): TeamGql!
 }
 
@@ -156,11 +170,22 @@ type Query {
   matchesPaginated(page: Int = 1, pageSize: Int = 20, seasonId: ID!): MatchesPageGql!
   me: Me!
   season(id: ID!): SeasonGql!
+  seasonDerbyMatches(seasonId: ID!): [SeasonDerbyMatchGql!]!
   seasons(leagueId: ID!): [SeasonGql!]!
   sports: [SportGql!]!
   strengthSnapshot(id: ID!): StrengthSnapshotGql!
   team(id: ID!): TeamGql!
   teams(seasonId: ID!): [TeamGql!]!
+}
+
+type SeasonDerbyMatchGql {
+  awayTeamId: ID!
+  awayTeamName: String!
+  homeTeamId: ID!
+  homeTeamName: String!
+  id: ID!
+  seasonId: ID!
+  type: DerbyType!
 }
 
 type SeasonGql {
@@ -229,6 +254,11 @@ input UpdateMatchInput {
   kHome: Float
   total: Float
   tourId: ID
+}
+
+input UpdateSeasonDerbyMatchInput {
+  id: ID!
+  type: DerbyType
 }
 
 input UpdateSeasonInput {
