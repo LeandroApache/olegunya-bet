@@ -35,6 +35,12 @@ import {
     createStrengthSnapshotMutation,
     type StrengthSnapshot,
 } from "@/entities/strength";
+import {
+    seasonDerbyMatchesQuery,
+    createSeasonDerbyMatchMutation,
+    deleteSeasonDerbyMatchMutation,
+    type SeasonDerbyMatch,
+} from "@/entities/derby";
 
 function toLocalDateInputValue(d = new Date()) {
     // YYYY-MM-DD
@@ -130,6 +136,41 @@ export default function SeasonPage() {
         return [...list].sort((a, b) => a.name.localeCompare(b.name));
     }, [teamsQ.data]);
 
+    // ===== DERBY MATCHES =====
+    const derbyQ = useQuery({
+        queryKey: ["seasonDerbyMatches", seasonId],
+        queryFn: () => seasonDerbyMatchesQuery(seasonId),
+    });
+
+    const [derbyHomeTeamId, setDerbyHomeTeamId] = useState<string | undefined>(undefined);
+    const [derbyAwayTeamId, setDerbyAwayTeamId] = useState<string | undefined>(undefined);
+
+    const createDerbyM = useMutation({
+        mutationFn: async () => {
+            if (!derbyHomeTeamId || !derbyAwayTeamId) throw new Error("Select teams");
+            if (derbyHomeTeamId === derbyAwayTeamId) throw new Error("Teams must differ");
+
+            return createSeasonDerbyMatchMutation({
+                seasonId,
+                homeTeamId: derbyHomeTeamId,
+                awayTeamId: derbyAwayTeamId,
+                type: "DERBY",
+            });
+        },
+        onSuccess: async () => {
+            setDerbyHomeTeamId(undefined);
+            setDerbyAwayTeamId(undefined);
+            await qc.invalidateQueries({ queryKey: ["seasonDerbyMatches", seasonId] });
+        },
+    });
+
+    const deleteDerbyM = useMutation({
+        mutationFn: async (id: string) => deleteSeasonDerbyMatchMutation(id),
+        onSuccess: async () => {
+            await qc.invalidateQueries({ queryKey: ["seasonDerbyMatches", seasonId] });
+        },
+    });
+
     // ===== MATCHES =====
     const [matchesPage, setMatchesPage] = useState(1);
     const matchesPageSize = 10;
@@ -216,6 +257,17 @@ export default function SeasonPage() {
             return dateB - dateA; // Descending order (newest first)
         });
     }, [matchesQ.data]);
+
+    /** Выбранные в форме матча команды совпадают с парой из списка дерби (порядок не важен). */
+    const matchFormIsDerby = useMemo(() => {
+        if (!homeTeamId || !awayTeamId || homeTeamId === awayTeamId) return false;
+        const derbies = derbyQ.data ?? [];
+        return derbies.some(
+            (d: SeasonDerbyMatch) =>
+                (d.homeTeamId === homeTeamId && d.awayTeamId === awayTeamId) ||
+                (d.homeTeamId === awayTeamId && d.awayTeamId === homeTeamId),
+        );
+    }, [homeTeamId, awayTeamId, derbyQ.data]);
 
     // ===== STRENGTH =====
     const [fromDate, setFromDate] = useState(""); // YYYY-MM-DD
@@ -377,6 +429,95 @@ export default function SeasonPage() {
     return (
         <div className="min-h-screen p-6 space-y-6">
             <div className="text-xl font-semibold">Season</div>
+
+            {/* ===== DERBY MATCHES ===== */}
+            <div className="rounded-2xl border p-4 space-y-4">
+                <div className="text-sm font-medium">Derby matches (football only)</div>
+
+                <div className="grid gap-3 md:grid-cols-4">
+                    <Select value={derbyHomeTeamId} onValueChange={setDerbyHomeTeamId}>
+                        <SelectTrigger>
+                            <SelectValue placeholder="Home team" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            {sortedTeams.map((t) => (
+                                <SelectItem key={t.id} value={t.id}>
+                                    {t.name}
+                                </SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+
+                    <Select value={derbyAwayTeamId} onValueChange={setDerbyAwayTeamId}>
+                        <SelectTrigger>
+                            <SelectValue placeholder="Away team" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            {sortedTeams.map((t) => (
+                                <SelectItem key={t.id} value={t.id}>
+                                    {t.name}
+                                </SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+
+                    <div className="text-sm text-muted-foreground flex items-center">
+                        Type: <span className="ml-1 font-medium">DERBY</span>
+                    </div>
+
+                    <Button
+                        onClick={() => createDerbyM.mutate()}
+                        disabled={createDerbyM.isPending || !sortedTeams.length}
+                    >
+                        {createDerbyM.isPending ? "Saving…" : "Add derby"}
+                    </Button>
+                </div>
+
+                {createDerbyM.isError && (
+                    <div className="text-sm text-red-600">
+                        {(createDerbyM.error as any)?.response?.errors?.[0]?.message ??
+                            (createDerbyM.error as any)?.message ??
+                            "Create derby failed"}
+                    </div>
+                )}
+
+                {derbyQ.isLoading && (
+                    <div className="text-sm text-muted-foreground">Loading derby matches…</div>
+                )}
+                {derbyQ.isError && (
+                    <div className="text-sm text-red-600">
+                        {(derbyQ.error as any)?.response?.errors?.[0]?.message ??
+                            "Failed to load derby matches"}
+                    </div>
+                )}
+
+                {derbyQ.data && derbyQ.data.length > 0 && (
+                    <div className="space-y-2">
+                        {(derbyQ.data as SeasonDerbyMatch[]).map((d) => (
+                            <div
+                                key={d.id}
+                                className="rounded-xl border p-3 flex items-center justify-between gap-3"
+                            >
+                                <div>
+                                    <div className="font-medium">
+                                        {d.homeTeamName} — {d.awayTeamName}
+                                    </div>
+                                    <div className="text-xs text-muted-foreground">
+                                        {d.type}
+                                    </div>
+                                </div>
+                                <Button
+                                    variant="destructive"
+                                    onClick={() => deleteDerbyM.mutate(d.id)}
+                                    disabled={deleteDerbyM.isPending}
+                                >
+                                    Delete
+                                </Button>
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </div>
 
             {/* ===== TEAMS ===== */}
             <div className="rounded-2xl border p-4 space-y-4">
@@ -560,6 +701,16 @@ export default function SeasonPage() {
                     <Input value={kDraw} onChange={(e) => setKDraw(e.target.value)} placeholder="kDraw" />
                     <Input value={kAway} onChange={(e) => setKAway(e.target.value)} placeholder="kAway" />
                 </div>
+
+                {matchFormIsDerby && (
+                    <div
+                        role="status"
+                        className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-950 dark:border-amber-400/30 dark:bg-amber-400/10 dark:text-amber-50"
+                    >
+                        <span className="font-medium">Дерби:</span> эта пара команд есть в списке дерби сезона.
+                        При сохранении матча для расчёта дельты силы будет использована формула для дерби.
+                    </div>
+                )}
 
                 <div className="grid gap-3 md:grid-cols-6">
                     <div className="md:col-span-2 text-sm text-muted-foreground">
