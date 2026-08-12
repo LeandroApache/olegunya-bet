@@ -1,5 +1,6 @@
 const { spawnSync } = require('node:child_process');
 const fs = require('node:fs');
+const http = require('node:http');
 const path = require('node:path');
 const { URL } = require('node:url');
 const { Client } = require('pg');
@@ -7,6 +8,7 @@ const { Client } = require('pg');
 const backendDir = path.resolve(__dirname, '..');
 const schemaPath = path.join(backendDir, 'prisma', 'schema.prisma');
 const mainPath = path.join(backendDir, 'dist', 'main.js');
+const listenPort = process.env.PORT ? Number(process.env.PORT) : 3000;
 
 function redactDatabaseUrl(raw) {
   try {
@@ -34,7 +36,6 @@ function normalizeDatabaseUrl(raw) {
     }
     if (needsRailwaySsl(raw)) {
       // В новых pg `sslmode=require` = verify-full → SELF_SIGNED_CERT_IN_CHAIN на Railway proxy.
-      // uselibpqcompat возвращает старое поведение libpq для require.
       u.searchParams.set('uselibpqcompat', 'true');
       u.searchParams.set('sslmode', 'require');
     }
@@ -46,13 +47,10 @@ function normalizeDatabaseUrl(raw) {
 
 function pgSslConfig(connectionString) {
   if (!needsRailwaySsl(connectionString)) return undefined;
-  // Явно не проверяем CA-цепочку Railway public proxy.
   return { rejectUnauthorized: false };
 }
 
 function pgConnectionString(connectionString) {
-  // Если в URL остался sslmode=require без uselibpqcompat, pg игнорирует rejectUnauthorized.
-  // Для Client/Pool убираем sslmode и полагаемся на ssl: { rejectUnauthorized: false }.
   try {
     const u = new URL(connectionString);
     if (needsRailwaySsl(connectionString)) {
@@ -83,6 +81,33 @@ function run(label, cmd, args, env = process.env) {
     console.error(`[start-railway] ${label} exited with code ${res.status}`);
     process.exit(res.status || 1);
   }
+}
+
+function startBootServer() {
+  return new Promise((resolve, reject) => {
+    const server = http.createServer((req, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ status: 'starting', path: req.url }));
+    });
+
+    server.once('error', reject);
+    server.listen(listenPort, '0.0.0.0', () => {
+      console.log(`[start-railway] boot server listening on 0.0.0.0:${listenPort}`);
+      resolve(server);
+    });
+  });
+}
+
+function stopBootServer(server) {
+  return new Promise((resolve, reject) => {
+    server.close((err) => {
+      if (err) reject(err);
+      else {
+        console.log('[start-railway] boot server closed');
+        resolve();
+      }
+    });
+  });
 }
 
 async function probeDatabase(connectionString) {
@@ -127,17 +152,12 @@ async function main() {
   );
 
   if (!process.env.DATABASE_URL) {
-    console.error(
-      '[start-railway] DATABASE_URL is missing on the backend service.\n' +
-        'Even with Shared Variables, open backend → Variables and confirm DATABASE_URL is listed there.',
-    );
+    console.error('[start-railway] DATABASE_URL is missing on the backend service.');
     process.exit(1);
   }
 
   if (!process.env.JWT_ACCESS_SECRET) {
-    console.error(
-      '[start-railway] JWT_ACCESS_SECRET is missing. Nest will crash on auth module init.',
-    );
+    console.error('[start-railway] JWT_ACCESS_SECRET is missing.');
     process.exit(1);
   }
 
@@ -155,41 +175,45 @@ async function main() {
     process.exit(1);
   }
 
-  await probeDatabase(databaseUrl);
+  // Сразу занимаем $PORT, чтобы Railway не отдавал 502 во время migrate.
+  const bootServer = await startBootServer();
 
-  const prismaCli = path.join(
-    backendDir,
-    'node_modules',
-    'prisma',
-    'build',
-    'index.js',
-  );
-  if (!fs.existsSync(prismaCli)) {
-    console.error(`[start-railway] prisma CLI not found at ${prismaCli}`);
-    process.exit(1);
-  }
-
-  // Для Prisma migrate на public Railway proxy надёжнее sslmode=no-verify.
-  let migrateDatabaseUrl = databaseUrl;
   try {
-    const u = new URL(databaseUrl);
-    if (needsRailwaySsl(databaseUrl)) {
-      u.searchParams.set('sslmode', 'no-verify');
-      u.searchParams.delete('uselibpqcompat');
-    }
-    migrateDatabaseUrl = u.toString();
-  } catch {
-    // keep as-is
-  }
+    await probeDatabase(databaseUrl);
 
-  run('migrate', 'node', [prismaCli, 'migrate', 'deploy', '--schema', schemaPath], {
-    ...process.env,
-    DATABASE_URL: migrateDatabaseUrl,
-  });
+    const prismaCli = path.join(
+      backendDir,
+      'node_modules',
+      'prisma',
+      'build',
+      'index.js',
+    );
+    if (!fs.existsSync(prismaCli)) {
+      console.error(`[start-railway] prisma CLI not found at ${prismaCli}`);
+      process.exit(1);
+    }
+
+    let migrateDatabaseUrl = databaseUrl;
+    try {
+      const u = new URL(databaseUrl);
+      if (needsRailwaySsl(databaseUrl)) {
+        u.searchParams.set('sslmode', 'no-verify');
+        u.searchParams.delete('uselibpqcompat');
+      }
+      migrateDatabaseUrl = u.toString();
+    } catch {
+      // keep as-is
+    }
+
+    run('migrate', 'node', [prismaCli, 'migrate', 'deploy', '--schema', schemaPath], {
+      ...process.env,
+      DATABASE_URL: migrateDatabaseUrl,
+    });
+  } finally {
+    await stopBootServer(bootServer);
+  }
 
   console.log('[start-railway] migrations OK, starting Nest in-process...');
-  // Важно: не spawn отдельного процесса — Railway/прокси ждут, что
-  // именно этот PID слушает $PORT. Иначе бывают ложные 502.
   require(mainPath);
 }
 
