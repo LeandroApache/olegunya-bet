@@ -32,12 +32,36 @@ function normalizeDatabaseUrl(raw) {
     if (!u.searchParams.has('connect_timeout')) {
       u.searchParams.set('connect_timeout', '15');
     }
-    if (needsRailwaySsl(raw) && !u.searchParams.has('sslmode')) {
+    if (needsRailwaySsl(raw)) {
+      // В новых pg `sslmode=require` = verify-full → SELF_SIGNED_CERT_IN_CHAIN на Railway proxy.
+      // uselibpqcompat возвращает старое поведение libpq для require.
+      u.searchParams.set('uselibpqcompat', 'true');
       u.searchParams.set('sslmode', 'require');
     }
     return u.toString();
   } catch {
     return raw;
+  }
+}
+
+function pgSslConfig(connectionString) {
+  if (!needsRailwaySsl(connectionString)) return undefined;
+  // Явно не проверяем CA-цепочку Railway public proxy.
+  return { rejectUnauthorized: false };
+}
+
+function pgConnectionString(connectionString) {
+  // Если в URL остался sslmode=require без uselibpqcompat, pg игнорирует rejectUnauthorized.
+  // Для Client/Pool убираем sslmode и полагаемся на ssl: { rejectUnauthorized: false }.
+  try {
+    const u = new URL(connectionString);
+    if (needsRailwaySsl(connectionString)) {
+      u.searchParams.delete('sslmode');
+      u.searchParams.delete('uselibpqcompat');
+    }
+    return u.toString();
+  } catch {
+    return connectionString;
   }
 }
 
@@ -64,11 +88,9 @@ function run(label, cmd, args, env = process.env) {
 async function probeDatabase(connectionString) {
   console.log('[start-railway] probing database connection...');
   const client = new Client({
-    connectionString,
+    connectionString: pgConnectionString(connectionString),
     connectionTimeoutMillis: 15000,
-    ssl: needsRailwaySsl(connectionString)
-      ? { rejectUnauthorized: false }
-      : undefined,
+    ssl: pgSslConfig(connectionString),
   });
 
   try {
@@ -147,9 +169,22 @@ async function main() {
     process.exit(1);
   }
 
+  // Для Prisma migrate на public Railway proxy надёжнее sslmode=no-verify.
+  let migrateDatabaseUrl = databaseUrl;
+  try {
+    const u = new URL(databaseUrl);
+    if (needsRailwaySsl(databaseUrl)) {
+      u.searchParams.set('sslmode', 'no-verify');
+      u.searchParams.delete('uselibpqcompat');
+    }
+    migrateDatabaseUrl = u.toString();
+  } catch {
+    // keep as-is
+  }
+
   run('migrate', 'node', [prismaCli, 'migrate', 'deploy', '--schema', schemaPath], {
     ...process.env,
-    DATABASE_URL: databaseUrl,
+    DATABASE_URL: migrateDatabaseUrl,
   });
 
   console.log('[start-railway] migrations OK, starting Nest...');

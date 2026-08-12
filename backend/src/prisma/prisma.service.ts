@@ -17,6 +17,20 @@ function needsRailwaySsl(connectionString?: string): boolean {
   }
 }
 
+function pgConnectionString(connectionString: string): string {
+  try {
+    const u = new URL(connectionString);
+    if (needsRailwaySsl(connectionString)) {
+      // Иначе sslmode=require в новых pg = verify-full и ломает Railway proxy.
+      u.searchParams.delete('sslmode');
+      u.searchParams.delete('uselibpqcompat');
+    }
+    return u.toString();
+  } catch {
+    return connectionString;
+  }
+}
+
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleInit {
   constructor() {
@@ -25,9 +39,8 @@ export class PrismaService extends PrismaClient implements OnModuleInit {
       throw new Error('DATABASE_URL is not set');
     }
 
-    // Public Railway proxy требует SSL; локальный Postgres — нет.
     const pool = new Pool({
-      connectionString,
+      connectionString: pgConnectionString(connectionString),
       ssl: needsRailwaySsl(connectionString)
         ? { rejectUnauthorized: false }
         : undefined,
