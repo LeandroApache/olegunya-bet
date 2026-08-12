@@ -1,5 +1,7 @@
+# TCP healthcheck only (no HTTP path).
+# HTTP /health sometimes помечал инстанс unhealthy → снаружи 502,
+# хотя Nest уже писал "listening on 0.0.0.0:8080".
 [deploy]
-healthcheckPath = "/health"
 healthcheckTimeout = 300
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 10

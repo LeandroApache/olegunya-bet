@@ -1,17 +1,23 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 
+process.on('uncaughtException', (err) => {
+  console.error('[bootstrap] uncaughtException:', err);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[bootstrap] unhandledRejection:', reason);
+});
+
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
-  const corsOrigin = process.env.CORS_ORIGIN
-    ?.split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
+  // До Nest guards: Railway healthcheck не должен упираться в JWT.
+  const http = app.getHttpAdapter().getInstance();
+  http.get('/health', (_req: unknown, res: { status: (code: number) => { json: (body: unknown) => void } }) => {
+    res.status(200).json({ ok: true });
+  });
 
   app.enableCors({
-    // Чтобы preflight точно проходил, по умолчанию разрешаем все origin.
-    // При желании домены можно сузить через CORS_ORIGIN (но тогда важно совпадение с фронтом 1:1).
     origin: true,
     credentials: true,
     methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
@@ -25,6 +31,11 @@ async function bootstrap() {
   // Railway проксирует на $PORT; bind на 0.0.0.0 обязателен в контейнере.
   await app.listen(listenPort, '0.0.0.0');
   console.log(`[bootstrap] listening on 0.0.0.0:${listenPort}`);
+
+  // Если процесс умрёт — в логах перестанет появляться heartbeat.
+  setInterval(() => {
+    console.log(`[bootstrap] heartbeat pid=${process.pid} uptime=${Math.floor(process.uptime())}s`);
+  }, 30000).unref();
 }
 
 bootstrap().catch((err) => {
