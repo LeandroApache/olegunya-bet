@@ -27,7 +27,8 @@ import { DerbyModule } from './derby/derby.module';
     PrismaModule,
     GraphQLModule.forRoot<ApolloDriverConfig>({
       driver: ApolloDriver,
-      autoSchemaFile: join(process.cwd(), 'src/schema.gql'),
+      // В проде на Railway нет смысла писать в src/; schema рядом с cwd надёжнее.
+      autoSchemaFile: join(process.cwd(), 'schema.gql'),
       sortSchema: true,
       playground: true,
       context: ({ req }) => ({ req }),
