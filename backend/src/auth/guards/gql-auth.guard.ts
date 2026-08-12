@@ -11,6 +11,10 @@ export class GqlAuthGuard extends AuthGuard('jwt') {
     }
 
     getRequest(context: ExecutionContext) {
+        // REST healthcheck / обычный HTTP — не GraphQL context
+        if (context.getType() === 'http') {
+            return context.switchToHttp().getRequest();
+        }
         const ctx = GqlExecutionContext.create(context);
         return ctx.getContext().req;
     }

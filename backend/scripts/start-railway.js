@@ -187,8 +187,10 @@ async function main() {
     DATABASE_URL: migrateDatabaseUrl,
   });
 
-  console.log('[start-railway] migrations OK, starting Nest...');
-  run('app', 'node', [mainPath], process.env);
+  console.log('[start-railway] migrations OK, starting Nest in-process...');
+  // Важно: не spawn отдельного процесса — Railway/прокси ждут, что
+  // именно этот PID слушает $PORT. Иначе бывают ложные 502.
+  require(mainPath);
 }
 
 main().catch((err) => {

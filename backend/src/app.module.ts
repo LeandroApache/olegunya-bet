@@ -16,6 +16,8 @@ import { MatchModule } from './match/match.module';
 import { StrengthModule } from './strength/strength.module';
 import { SportModule } from './sport/sport.module';
 import { DerbyModule } from './derby/derby.module';
+import { AppController } from './app.controller';
+import { AppService } from './app.service';
 
 
 @Module({
@@ -42,7 +44,9 @@ import { DerbyModule } from './derby/derby.module';
     SportModule,
     DerbyModule
   ],
+  controllers: [AppController],
   providers: [
+    AppService,
     {
       provide: APP_GUARD,
       useClass: GqlAuthGuard,
