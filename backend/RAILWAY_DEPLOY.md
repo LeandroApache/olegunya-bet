@@ -1,23 +1,57 @@
 # Railway Deployment Guide
 
-## Prisma Client Generation
+## Build vs runtime logs
 
-Prisma client is automatically generated:
-1. After `npm install` (via `postinstall` script)
-2. Before build (via `build` script)
+| Вкладка | Что показывает |
+|--------|----------------|
+| **Build Logs** | `npm install`, `npm run build` — только сборка |
+| **Deploy Logs** / **Logs** (после "Starting Container") | `npm run start:railway`, миграции, старт Nest |
 
-## Build Process
+Если Build Logs без ошибок, но сайт даёт **502** или CORS — смотри **runtime logs**, не build.
 
-The build script runs in this order:
-1. `prisma generate` - Generates Prisma client to `generated/prisma/`
-2. `nest build` - Compiles TypeScript to JavaScript
-3. `copy:prisma` - Copies generated Prisma client to `dist/generated/prisma/`
+### Где открыть runtime logs
 
-## Environment Variables
+1. Railway → проект → сервис **backend** (не Postgres).
+2. Вкладка **Deployments** → последний деплой → **View logs**.
+3. Или вкладка **Logs** → выбери сервис backend → прокрути к **Starting Container**.
+4. Ищи строки `[start-railway]` и `[bootstrap] listening on 0.0.0.0:...`.
 
-Make sure to set `DATABASE_URL` in Railway environment variables.
+Если контейнер падает до старта Node, в логах будет `exited with code` или ошибка Prisma (`P1001`, `P1012`, …).
 
-## Notes
+## Service settings
 
-- The `generated/prisma` folder is gitignored and will be created during build
-- Railway will automatically run `npm install` and `npm run build` during deployment
+| Поле | Значение |
+|------|----------|
+| **Root Directory** | `backend` |
+| **Build Command** | `npm run build` (или авто) |
+| **Start Command** | `npm run start:railway` |
+
+## Environment variables (backend service)
+
+| Variable | Required | How to set |
+|----------|----------|------------|
+| `DATABASE_URL` | Yes | Variables → **Add Reference** → Postgres → `DATABASE_URL` |
+| `JWT_ACCESS_SECRET` | Yes | любая длинная случайная строка |
+| `PORT` | Auto | Railway задаёт сам, не перезаписывать |
+| `CORS_ORIGIN` | Optional | `https://olegunya-bet.vercel.app` |
+
+Без `DATABASE_URL` скрипт `start-railway` завершится с явной ошибкой в логах.
+
+## Build process
+
+1. `prisma generate` → `generated/prisma/`
+2. `nest build` → `dist/`
+3. `copy:prisma` → `dist/generated/`
+
+## Start process (`start:railway`)
+
+1. `prisma migrate deploy`
+2. `node dist/main.js` (listen on `0.0.0.0:$PORT`)
+
+## Quick checks after deploy
+
+```bash
+curl -i https://olegunya-bet-production.up.railway.app/graphql
+```
+
+Ожидается **не 502** (например 400 или HTML playground). Если 502 — backend не слушает порт или контейнер упал.
