@@ -177,17 +177,17 @@ async function main() {
 
   // Сразу занимаем $PORT, чтобы Railway не отдавал 502 во время migrate.
   const bootServer = await startBootServer();
+  const prismaCli = path.join(
+    backendDir,
+    'node_modules',
+    'prisma',
+    'build',
+    'index.js',
+  );
 
   try {
     await probeDatabase(databaseUrl);
 
-    const prismaCli = path.join(
-      backendDir,
-      'node_modules',
-      'prisma',
-      'build',
-      'index.js',
-    );
     if (!fs.existsSync(prismaCli)) {
       console.error(`[start-railway] prisma CLI not found at ${prismaCli}`);
       process.exit(1);
@@ -212,6 +212,19 @@ async function main() {
   } finally {
     await stopBootServer(bootServer);
   }
+
+  // Prisma 7: клиент живёт в generated/, pre-deploy generate в образ не попадает.
+  // На старте гарантируем, что client есть в файловой системе контейнера.
+  if (!fs.existsSync(prismaCli)) {
+    console.error(`[start-railway] prisma CLI not found at ${prismaCli}`);
+    process.exit(1);
+  }
+
+  run('generate', 'node', [prismaCli, 'generate', '--schema', schemaPath], {
+    ...process.env,
+    DATABASE_URL: databaseUrl,
+    PRISMA_SKIP_ENV_VALIDATION: '1',
+  });
 
   console.log('[start-railway] migrations OK, starting Nest in-process...');
   require(mainPath);

@@ -1,11 +1,31 @@
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { Injectable, OnModuleInit } from '@nestjs/common';
 import { Pool } from 'pg';
+import { PrismaPg } from '@prisma/adapter-pg';
 
-// Prisma client из твоего generated (через абсолютный путь — стабильно)
-const { PrismaClient } = require(`${process.cwd()}/generated/prisma`);
+function resolvePrismaClientPath(): string {
+  const candidates = [
+    // После nest build + copy:prisma: dist/prisma → dist/generated/prisma
+    join(__dirname, '..', 'generated', 'prisma'),
+    // Корень сервиса после prisma generate
+    join(process.cwd(), 'generated', 'prisma'),
+    join(process.cwd(), 'dist', 'generated', 'prisma'),
+  ];
 
-// Driver adapter для Postgres
-const { PrismaPg } = require('@prisma/adapter-pg');
+  for (const candidate of candidates) {
+    if (existsSync(join(candidate, 'index.js')) || existsSync(`${candidate}.js`)) {
+      return candidate;
+    }
+  }
+
+  throw new Error(
+    `Prisma Client not found. Tried:\n${candidates.map((c) => `- ${c}`).join('\n')}\n` +
+      `Run: npx prisma generate --schema=./prisma/schema.prisma`,
+  );
+}
+
+const { PrismaClient } = require(resolvePrismaClientPath());
 
 function needsRailwaySsl(connectionString?: string): boolean {
   if (!connectionString) return false;
