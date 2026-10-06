@@ -28,9 +28,10 @@ async function bootstrap() {
   const port = process.env.PORT ? Number(process.env.PORT) : 3000;
   const listenPort = Number.isFinite(port) ? port : 3000;
 
-  // Railway проксирует на $PORT; bind на 0.0.0.0 обязателен в контейнере.
-  await app.listen(listenPort, '0.0.0.0');
-  console.log(`[bootstrap] listening on 0.0.0.0:${listenPort}`);
+  // Без явного host Node слушает dual-stack где возможно.
+  // Явный 0.0.0.0 иногда даёт 502 на Railway edge (IPv6/прокси).
+  await app.listen(listenPort);
+  console.log(`[bootstrap] listening on port ${listenPort} (PORT=${process.env.PORT ?? 'unset'})`);
 
   // Если процесс умрёт — в логах перестанет появляться heartbeat.
   setInterval(() => {

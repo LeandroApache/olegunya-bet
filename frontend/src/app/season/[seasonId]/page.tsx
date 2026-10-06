@@ -325,17 +325,50 @@ export default function SeasonPage() {
         }
     }, [calculateOddsQ.data]);
 
-    // Build chess table data: Map of "homeTeamId-awayTeamId" -> total
+    // Без принудительного toFixed(1): 2.75 остаётся 2.75
+    const formatTotal = (n: number) =>
+        Number.isInteger(n) ? String(n) : parseFloat(n.toPrecision(12)).toString();
+
+    // Build chess table data: unordered pair {A,B} → all totals (home or away either way)
     const chessTableData = useMemo(() => {
-        const map = new Map<string, number>();
-        const matches = allMatchesQ.data ?? [];
+        const map = new Map<string, number[]>();
+        const matches = [...(allMatchesQ.data ?? [])].sort(
+            (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime(),
+        );
         for (const match of matches) {
-            if (match.total != null) {
-                const key = `${match.homeTeamId}-${match.awayTeamId}`;
-                map.set(key, match.total);
-            }
+            if (match.total == null) continue;
+            const [a, b] = [match.homeTeamId, match.awayTeamId].sort();
+            const key = `${a}|${b}`;
+            const list = map.get(key);
+            if (list) list.push(match.total);
+            else map.set(key, [match.total]);
         }
         return map;
+    }, [allMatchesQ.data]);
+
+    const pairTotalsKey = (teamIdA: string, teamIdB: string) => {
+        const [a, b] = [teamIdA, teamIdB].sort();
+        return `${a}|${b}`;
+    };
+
+    // Средний тотал команды по всем её матчам с заполненным total (дома и в гостях)
+    const teamAvgTotal = useMemo(() => {
+        const sums = new Map<string, { sum: number; count: number }>();
+        const matches = allMatchesQ.data ?? [];
+        for (const match of matches) {
+            if (match.total == null) continue;
+            for (const teamId of [match.homeTeamId, match.awayTeamId]) {
+                const cur = sums.get(teamId) ?? { sum: 0, count: 0 };
+                cur.sum += match.total;
+                cur.count += 1;
+                sums.set(teamId, cur);
+            }
+        }
+        const avg = new Map<string, number>();
+        sums.forEach((v, teamId) => {
+            if (v.count > 0) avg.set(teamId, v.sum / v.count);
+        });
+        return avg;
     }, [allMatchesQ.data]);
 
     // Build strength map: teamId -> strength
@@ -998,44 +1031,58 @@ export default function SeasonPage() {
                             </div>
                         </div>
 
+                        <div className="text-xs text-muted-foreground">
+                            В ячейке — все тоталы матчей между двумя командами (дома и в гостях). Под именем — средний тотал команды.
+                        </div>
+
                         <div className="rounded-xl border overflow-hidden overflow-x-auto">
                             <div className="min-w-full">
                                 {/* Header row */}
                                 <div className="grid gap-2 px-3 py-2 text-sm bg-muted/50 sticky top-0 z-10"
-                                    style={{ gridTemplateColumns: `120px repeat(${sortedTeams.length}, minmax(80px, 1fr))` }}>
-                                    <div className="font-medium">Team</div>
+                                    style={{ gridTemplateColumns: `140px repeat(${sortedTeams.length}, minmax(88px, 1fr))` }}>
+                                    <div className="font-medium">Team / avg</div>
                                     {sortedTeams.map((team) => {
                                         const headerStyle = getHeaderColorStyle(team.id);
+                                        const avg = teamAvgTotal.get(team.id);
                                         return (
                                             <div
                                                 key={team.id}
-                                                className="font-medium text-center text-xs truncate"
-                                                title={team.name}
+                                                className="font-medium text-center text-xs"
+                                                title={avg != null ? `${team.name} · avg ${formatTotal(avg)}` : team.name}
                                                 style={headerStyle}
                                             >
-                                                {team.name}
+                                                <div className="truncate">{team.name}</div>
+                                                <div className="text-[10px] font-normal text-muted-foreground">
+                                                    {avg != null ? `μ ${formatTotal(avg)}` : "μ —"}
+                                                </div>
                                             </div>
                                         );
                                     })}
                                 </div>
 
                                 {/* Data rows */}
-                                {sortedTeams.map((rowTeam) => (
+                                {sortedTeams.map((rowTeam) => {
+                                    const rowAvg = teamAvgTotal.get(rowTeam.id);
+                                    return (
                                     <div
                                         key={rowTeam.id}
                                         className="grid gap-2 px-3 py-2 text-sm border-t"
-                                        style={{ gridTemplateColumns: `120px repeat(${sortedTeams.length}, minmax(80px, 1fr))` }}
+                                        style={{ gridTemplateColumns: `140px repeat(${sortedTeams.length}, minmax(88px, 1fr))` }}
                                     >
                                         <div
-                                            className="font-medium truncate"
-                                            title={rowTeam.name}
+                                            className="font-medium"
+                                            title={rowAvg != null ? `${rowTeam.name} · avg ${formatTotal(rowAvg)}` : rowTeam.name}
                                             style={getHeaderColorStyle(rowTeam.id)}
                                         >
-                                            {rowTeam.name}
+                                            <div className="truncate">{rowTeam.name}</div>
+                                            <div className="text-[10px] font-normal text-muted-foreground">
+                                                {rowAvg != null ? `μ ${formatTotal(rowAvg)}` : "μ —"}
+                                            </div>
                                         </div>
                                         {sortedTeams.map((colTeam) => {
-                                            const key = `${rowTeam.id}-${colTeam.id}`;
-                                            const total = chessTableData.get(key);
+                                            const totals = chessTableData.get(
+                                                pairTotalsKey(rowTeam.id, colTeam.id),
+                                            );
                                             const cellStyle = getCellColorStyle(rowTeam.id, colTeam.id);
 
                                             if (rowTeam.id === colTeam.id) {
@@ -1051,9 +1098,16 @@ export default function SeasonPage() {
                                                     key={colTeam.id}
                                                     className="text-center"
                                                     style={cellStyle}
+                                                    title={
+                                                        totals?.length
+                                                            ? totals.map(formatTotal).join(" · ")
+                                                            : undefined
+                                                    }
                                                 >
-                                                    {total != null ? (
-                                                        <span className="font-medium">{total.toFixed(1)}</span>
+                                                    {totals?.length ? (
+                                                        <span className="font-medium leading-tight">
+                                                            {totals.map(formatTotal).join(" / ")}
+                                                        </span>
                                                     ) : (
                                                         <span className="text-muted-foreground">—</span>
                                                     )}
@@ -1061,7 +1115,8 @@ export default function SeasonPage() {
                                             );
                                         })}
                                     </div>
-                                ))}
+                                    );
+                                })}
                             </div>
                         </div>
                     </div>
