@@ -5,11 +5,29 @@ import {
     NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { SportKey } from '../../generated/prisma';
+import { ExternalDataProvider, SportKey } from '../../generated/prisma';
 import { CreateMatchInput, UpdateMatchInput } from './dto/match.inputs';
-import { MatchComputedGql, MatchGql, MarketTypeGql, MatchesPageGql } from './dto/match.types';
+import {
+    MatchComputedGql,
+    MatchGql,
+    MarketTypeGql,
+    MatchesPageGql,
+} from './dto/match.types';
 
 type ImpliedProbs = { pHomeImplied: number; pDrawImplied: number; pAwayImplied: number };
+
+export type ImportedMatchInput = {
+    seasonId: string;
+    date: string | Date;
+    homeTeamId: string;
+    awayTeamId: string;
+    kHome: number;
+    kDraw: number;
+    kAway: number;
+    total?: number | null;
+    source: ExternalDataProvider;
+    externalFixtureId: string;
+};
 
 @Injectable()
 export class MatchService {
@@ -216,6 +234,8 @@ export class MatchService {
             kDraw: row.kDraw,
             kAway: row.kAway,
             total: row.total,
+            source: row.source ?? null,
+            externalFixtureId: row.externalFixtureId ?? null,
             computed: row.computed
                 ? ({
                     baseProbUsed: row.computed.baseProbUsed,
@@ -229,6 +249,76 @@ export class MatchService {
                 : null,
             createdAt: row.createdAt,
             updatedAt: row.updatedAt,
+        };
+    }
+
+    /**
+     * Shared domain calculation for manual create/update and OddsPapi import.
+     * Intentionally keeps dirty implied probabilities (no de-vig).
+     */
+    private computeDerivedForMatch(params: {
+        isFootball: boolean;
+        derbyMatches: Array<{ homeTeamId: string; awayTeamId: string }>;
+        homeTeamId: string;
+        awayTeamId: string;
+        kHome: number;
+        kDraw: number;
+        kAway: number;
+        flipCoef: number;
+        baseCoefHomeEqual: number;
+    }): { implied: ImpliedProbs; baseProbUsed: number; deltaHome: number; deltaAway: number } {
+        const {
+            isFootball,
+            derbyMatches,
+            homeTeamId,
+            awayTeamId,
+            kHome,
+            kDraw,
+            kAway,
+            flipCoef,
+            baseCoefHomeEqual,
+        } = params;
+
+        if (!isFinite(kHome) || !isFinite(kDraw) || !isFinite(kAway)) {
+            throw new BadRequestException('Invalid odds');
+        }
+        if (kHome <= 1 || kDraw <= 1 || kAway <= 1) {
+            throw new BadRequestException('Odds must be > 1');
+        }
+
+        const isDerby =
+            isFootball &&
+            !!derbyMatches.find(
+                (d) =>
+                    (d.homeTeamId === homeTeamId && d.awayTeamId === awayTeamId) ||
+                    (d.homeTeamId === awayTeamId && d.awayTeamId === homeTeamId),
+            );
+
+        if (isDerby) {
+            return this.computeDerbyImpliedAndDelta(
+                kHome,
+                kDraw,
+                kAway,
+                flipCoef,
+                baseCoefHomeEqual,
+            );
+        }
+
+        const kHomeEffective = this.computeEffectiveHomeOddsDirty(kHome, kAway, flipCoef);
+        const implied = this.computeImpliedProbsFromOdds(kHomeEffective, kDraw, kAway);
+        const dirty = this.computeDeltaDirty(
+            baseCoefHomeEqual,
+            implied.pHomeImplied,
+            implied.pAwayImplied,
+            flipCoef,
+            kHome,
+            kAway,
+        );
+        return {
+            implied,
+            baseProbUsed: dirty.baseProbUsed,
+            deltaHome: dirty.deltaHome,
+            deltaAway: dirty.deltaAway,
         };
     }
 
@@ -265,51 +355,17 @@ export class MatchService {
             throw new BadRequestException('Teams must belong to the same season as match');
         }
 
-        const isFootball = season.league.sport.key === SportKey.FOOTBALL;
-        const isDerby =
-            isFootball &&
-            !!season.derbyMatches.find(
-                (d) =>
-                    (d.homeTeamId === input.homeTeamId && d.awayTeamId === input.awayTeamId) ||
-                    (d.homeTeamId === input.awayTeamId && d.awayTeamId === input.homeTeamId),
-            );
-
-        let implied: ImpliedProbs;
-        let baseProbUsed: number;
-        let deltaHome: number;
-        let deltaAway: number;
-
-        if (isDerby) {
-            const derbyComputed = this.computeDerbyImpliedAndDelta(
-                input.kHome,
-                input.kDraw,
-                input.kAway,
-                season.flipCoef,
-                season.baseCoefHomeEqual,
-            );
-            implied = derbyComputed.implied;
-            baseProbUsed = derbyComputed.baseProbUsed;
-            deltaHome = derbyComputed.deltaHome;
-            deltaAway = derbyComputed.deltaAway;
-        } else {
-            const kHomeEffective = this.computeEffectiveHomeOddsDirty(
-                input.kHome,
-                input.kAway,
-                season.flipCoef,
-            );
-            implied = this.computeImpliedProbsFromOdds(kHomeEffective, input.kDraw, input.kAway);
-            const dirty = this.computeDeltaDirty(
-                season.baseCoefHomeEqual,
-                implied.pHomeImplied,
-                implied.pAwayImplied,
-                season.flipCoef,
-                input.kHome,
-                input.kAway,
-            );
-            baseProbUsed = dirty.baseProbUsed;
-            deltaHome = dirty.deltaHome;
-            deltaAway = dirty.deltaAway;
-        }
+        const { implied, baseProbUsed, deltaHome, deltaAway } = this.computeDerivedForMatch({
+            isFootball: season.league.sport.key === SportKey.FOOTBALL,
+            derbyMatches: season.derbyMatches,
+            homeTeamId: input.homeTeamId,
+            awayTeamId: input.awayTeamId,
+            kHome: input.kHome,
+            kDraw: input.kDraw,
+            kAway: input.kAway,
+            flipCoef: season.flipCoef,
+            baseCoefHomeEqual: season.baseCoefHomeEqual,
+        });
 
         const date = new Date(input.date);
         const marketType = (input.marketType ?? MarketTypeGql.MATCH_1X2_REGULAR_TIME) as any;
@@ -362,6 +418,143 @@ export class MatchService {
         } catch (e: any) {
             if (e?.code === 'P2002') {
                 throw new ConflictException('Match already exists (same season/date/teams/marketType)');
+            }
+            throw e;
+        }
+    }
+
+    /**
+     * Create or update a match from an external provider using the same
+     * calculation path as manual create/update (incl. derby detection).
+     */
+    async upsertImportedMatch(
+        input: ImportedMatchInput,
+    ): Promise<{ match: MatchGql; created: boolean }> {
+        if (!input.externalFixtureId?.trim()) {
+            throw new BadRequestException('externalFixtureId is required');
+        }
+        if (input.homeTeamId === input.awayTeamId) {
+            throw new BadRequestException('homeTeamId and awayTeamId must be different');
+        }
+
+        const season = await this.prisma.season.findUnique({
+            where: { id: input.seasonId },
+            include: {
+                league: { include: { sport: true } },
+                derbyMatches: true,
+            },
+        });
+        if (!season) throw new NotFoundException('Season not found');
+
+        const [homeTeam, awayTeam] = await Promise.all([
+            this.prisma.team.findUnique({
+                where: { id: input.homeTeamId },
+                select: { id: true, seasonId: true },
+            }),
+            this.prisma.team.findUnique({
+                where: { id: input.awayTeamId },
+                select: { id: true, seasonId: true },
+            }),
+        ]);
+        if (!homeTeam || !awayTeam) throw new NotFoundException('Team not found');
+        if (homeTeam.seasonId !== season.id || awayTeam.seasonId !== season.id) {
+            throw new BadRequestException('Teams must belong to the same season as match');
+        }
+
+        const { implied, baseProbUsed, deltaHome, deltaAway } = this.computeDerivedForMatch({
+            isFootball: season.league.sport.key === SportKey.FOOTBALL,
+            derbyMatches: season.derbyMatches,
+            homeTeamId: input.homeTeamId,
+            awayTeamId: input.awayTeamId,
+            kHome: input.kHome,
+            kDraw: input.kDraw,
+            kAway: input.kAway,
+            flipCoef: season.flipCoef,
+            baseCoefHomeEqual: season.baseCoefHomeEqual,
+        });
+
+        const date = new Date(input.date);
+        const marketType = MarketTypeGql.MATCH_1X2_REGULAR_TIME as any;
+        const externalFixtureId = input.externalFixtureId.trim();
+
+        const existing = await this.prisma.match.findUnique({
+            where: {
+                source_externalFixtureId: {
+                    source: input.source,
+                    externalFixtureId,
+                },
+            },
+            select: { id: true },
+        });
+
+        try {
+            const row = await this.prisma.$transaction(async (tx) => {
+                const match = existing
+                    ? await tx.match.update({
+                        where: { id: existing.id },
+                        data: {
+                            seasonId: season.id,
+                            date,
+                            marketType,
+                            homeTeamId: input.homeTeamId,
+                            awayTeamId: input.awayTeamId,
+                            kHome: input.kHome,
+                            kDraw: input.kDraw,
+                            kAway: input.kAway,
+                            total: input.total ?? null,
+                            source: input.source,
+                            externalFixtureId,
+                        },
+                    })
+                    : await tx.match.create({
+                        data: {
+                            seasonId: season.id,
+                            date,
+                            marketType,
+                            homeTeamId: input.homeTeamId,
+                            awayTeamId: input.awayTeamId,
+                            kHome: input.kHome,
+                            kDraw: input.kDraw,
+                            kAway: input.kAway,
+                            total: input.total ?? null,
+                            source: input.source,
+                            externalFixtureId,
+                        },
+                    });
+
+                await tx.matchComputed.upsert({
+                    where: { matchId: match.id },
+                    create: {
+                        matchId: match.id,
+                        baseProbUsed,
+                        pHomeImplied: implied.pHomeImplied,
+                        pDrawImplied: implied.pDrawImplied,
+                        pAwayImplied: implied.pAwayImplied,
+                        deltaHome,
+                        deltaAway,
+                    },
+                    update: {
+                        baseProbUsed,
+                        pHomeImplied: implied.pHomeImplied,
+                        pDrawImplied: implied.pDrawImplied,
+                        pAwayImplied: implied.pAwayImplied,
+                        deltaHome,
+                        deltaAway,
+                    },
+                });
+
+                return tx.match.findUniqueOrThrow({
+                    where: { id: match.id },
+                    include: { homeTeam: true, awayTeam: true, computed: true },
+                });
+            });
+
+            return { match: this.map(row), created: !existing };
+        } catch (e: any) {
+            if (e?.code === 'P2002') {
+                throw new ConflictException(
+                    'Match already exists (unique constraint on season/date/teams or external fixture)',
+                );
             }
             throw e;
         }
@@ -475,51 +668,17 @@ export class MatchService {
         const kDraw = input.kDraw ?? existing.kDraw;
         const kAway = input.kAway ?? existing.kAway;
 
-        const isFootball = existing.season.league.sport.key === SportKey.FOOTBALL;
-        const isDerby =
-            isFootball &&
-            !!existing.season.derbyMatches.find(
-                (d) =>
-                    (d.homeTeamId === homeTeamId && d.awayTeamId === awayTeamId) ||
-                    (d.homeTeamId === awayTeamId && d.awayTeamId === homeTeamId),
-            );
-
-        let implied: ImpliedProbs;
-        let baseProbUsed: number;
-        let deltaHome: number;
-        let deltaAway: number;
-
-        if (isDerby) {
-            const derbyComputed = this.computeDerbyImpliedAndDelta(
-                kHome,
-                kDraw,
-                kAway,
-                existing.season.flipCoef,
-                existing.season.baseCoefHomeEqual,
-            );
-            implied = derbyComputed.implied;
-            baseProbUsed = derbyComputed.baseProbUsed;
-            deltaHome = derbyComputed.deltaHome;
-            deltaAway = derbyComputed.deltaAway;
-        } else {
-            const kHomeEffective = this.computeEffectiveHomeOddsDirty(
-                kHome,
-                kAway,
-                existing.season.flipCoef,
-            );
-            implied = this.computeImpliedProbsFromOdds(kHomeEffective, kDraw, kAway);
-            const dirty = this.computeDeltaDirty(
-                existing.season.baseCoefHomeEqual,
-                implied.pHomeImplied,
-                implied.pAwayImplied,
-                existing.season.flipCoef,
-                kHome,
-                kAway,
-            );
-            baseProbUsed = dirty.baseProbUsed;
-            deltaHome = dirty.deltaHome;
-            deltaAway = dirty.deltaAway;
-        }
+        const { implied, baseProbUsed, deltaHome, deltaAway } = this.computeDerivedForMatch({
+            isFootball: existing.season.league.sport.key === SportKey.FOOTBALL,
+            derbyMatches: existing.season.derbyMatches,
+            homeTeamId,
+            awayTeamId,
+            kHome,
+            kDraw,
+            kAway,
+            flipCoef: existing.season.flipCoef,
+            baseCoefHomeEqual: existing.season.baseCoefHomeEqual,
+        });
 
         try {
             const updated = await this.prisma.$transaction(async (tx) => {

@@ -21,6 +21,10 @@ enum DerbyType {
   DERBY
 }
 
+enum ExternalDataProvider {
+  ODDSPAPI
+}
+
 /**
  * =======================
  * AUTH
@@ -55,8 +59,9 @@ model League {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  sport   Sport    @relation(fields: [sportId], references: [id])
-  seasons Season[]
+  sport             Sport                   @relation(fields: [sportId], references: [id])
+  seasons           Season[]
+  externalMappings  ExternalLeagueMapping[]
 
   @@unique([sportId, name])
 }
@@ -77,6 +82,7 @@ model Season {
   matches           Match[]
   strengthSnapshots StrengthSnapshot[]
   derbyMatches      SeasonDerbyMatch[]
+  externalTeamMappings ExternalTeamMapping[]
 
   @@unique([leagueId, name])
 }
@@ -99,6 +105,7 @@ model Team {
   derbyAwayMatches SeasonDerbyMatch[] @relation("derbyAwayTeam")
 
   strengthValues StrengthValue[]
+  externalMappings ExternalTeamMapping[]
 
   @@unique([seasonId, name])
 }
@@ -139,6 +146,10 @@ model Match {
 
   total Float?
 
+  /// Null for manually created matches.
+  source            ExternalDataProvider?
+  externalFixtureId String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -151,7 +162,51 @@ model Match {
   computed MatchComputed?
 
   @@unique([seasonId, date, homeTeamId, awayTeamId, marketType])
+  @@unique([source, externalFixtureId])
   @@index([seasonId, date])
+  @@index([externalFixtureId])
+}
+
+/**
+ * Maps OddsPapi (or future provider) tournament → internal League.
+ */
+model ExternalLeagueMapping {
+  id                   String               @id @default(cuid())
+  provider             ExternalDataProvider
+  externalTournamentId String
+  externalName         String?
+  leagueId             String
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+
+  league League @relation(fields: [leagueId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, externalTournamentId])
+  @@unique([provider, leagueId])
+  @@index([leagueId])
+}
+
+/**
+ * Maps provider participant → season-scoped internal Team.
+ * Same real-world club in another season = another Team row + another mapping row.
+ */
+model ExternalTeamMapping {
+  id                    String               @id @default(cuid())
+  provider              ExternalDataProvider
+  externalParticipantId String
+  externalName          String?
+  seasonId              String
+  teamId                String
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+
+  season Season @relation(fields: [seasonId], references: [id], onDelete: Cascade)
+  team   Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, externalParticipantId, seasonId])
+  @@unique([provider, teamId])
+  @@index([seasonId])
+  @@index([teamId])
 }
 
 model MatchComputed {

@@ -6,6 +6,12 @@ export enum MarketTypeGql {
 
 registerEnumType(MarketTypeGql, { name: 'MarketType' });
 
+export enum ExternalDataProviderGql {
+    ODDSPAPI = 'ODDSPAPI',
+}
+
+registerEnumType(ExternalDataProviderGql, { name: 'ExternalDataProvider' });
+
 @ObjectType()
 export class MatchComputedGql {
     @Field(() => Float)
@@ -68,6 +74,12 @@ export class MatchGql {
 
     @Field(() => Float, { nullable: true })
     total?: number | null;
+
+    @Field(() => ExternalDataProviderGql, { nullable: true })
+    source?: ExternalDataProviderGql | null;
+
+    @Field({ nullable: true })
+    externalFixtureId?: string | null;
 
     @Field(() => MatchComputedGql, { nullable: true })
     computed?: MatchComputedGql | null;
