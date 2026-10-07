@@ -105,8 +105,48 @@ export class SeasonService {
     }
 
     async remove(id: string): Promise<boolean> {
+        const existing = await this.prisma.season.findUnique({
+            where: { id },
+            select: { id: true },
+        });
+        if (!existing) throw new NotFoundException('Season not found');
+
         try {
-            await this.prisma.season.delete({ where: { id } });
+            await this.prisma.$transaction(async (tx) => {
+                const matchIds = (
+                    await tx.match.findMany({
+                        where: { seasonId: id },
+                        select: { id: true },
+                    })
+                ).map((m) => m.id);
+
+                if (matchIds.length) {
+                    await tx.matchComputed.deleteMany({
+                        where: { matchId: { in: matchIds } },
+                    });
+                    await tx.match.deleteMany({ where: { seasonId: id } });
+                }
+
+                const snapshotIds = (
+                    await tx.strengthSnapshot.findMany({
+                        where: { seasonId: id },
+                        select: { id: true },
+                    })
+                ).map((s) => s.id);
+
+                if (snapshotIds.length) {
+                    await tx.strengthValue.deleteMany({
+                        where: { snapshotId: { in: snapshotIds } },
+                    });
+                    await tx.strengthSnapshot.deleteMany({ where: { seasonId: id } });
+                }
+
+                await tx.seasonDerbyMatch.deleteMany({ where: { seasonId: id } });
+                await tx.externalTeamMapping.deleteMany({ where: { seasonId: id } });
+                await tx.tour.deleteMany({ where: { seasonId: id } });
+                await tx.team.deleteMany({ where: { seasonId: id } });
+                await tx.season.delete({ where: { id } });
+            });
             return true;
         } catch (e: any) {
             if (e?.code === 'P2025') {

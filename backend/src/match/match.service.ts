@@ -322,6 +322,85 @@ export class MatchService {
         };
     }
 
+    /**
+     * Recalculate MatchComputed for existing matches between a team pair
+     * (both venue directions) using the current SeasonDerbyMatch configuration.
+     * Does not modify Match odds/identity fields. Does not create StrengthSnapshot.
+     *
+     * Pass an interactive-transaction client when called from DerbyService so
+     * derby create/delete visibility and MatchComputed updates stay atomic.
+     */
+    async recalculateDerivedForTeamPair(
+        seasonId: string,
+        teamAId: string,
+        teamBId: string,
+        /** PrismaService or interactive `$transaction` client. */
+        db: any = this.prisma,
+    ): Promise<number> {
+        if (!teamAId || !teamBId || teamAId === teamBId) {
+            throw new BadRequestException('teamAId and teamBId must be different');
+        }
+
+        const season = await db.season.findUnique({
+            where: { id: seasonId },
+            include: {
+                league: { include: { sport: true } },
+                derbyMatches: true,
+            },
+        });
+        if (!season) throw new NotFoundException('Season not found');
+
+        const matches = await db.match.findMany({
+            where: {
+                seasonId,
+                OR: [
+                    { homeTeamId: teamAId, awayTeamId: teamBId },
+                    { homeTeamId: teamBId, awayTeamId: teamAId },
+                ],
+            },
+        });
+
+        const isFootball = season.league.sport.key === SportKey.FOOTBALL;
+
+        for (const match of matches) {
+            const { implied, baseProbUsed, deltaHome, deltaAway } =
+                this.computeDerivedForMatch({
+                    isFootball,
+                    derbyMatches: season.derbyMatches,
+                    homeTeamId: match.homeTeamId,
+                    awayTeamId: match.awayTeamId,
+                    kHome: match.kHome,
+                    kDraw: match.kDraw,
+                    kAway: match.kAway,
+                    flipCoef: season.flipCoef,
+                    baseCoefHomeEqual: season.baseCoefHomeEqual,
+                });
+
+            await db.matchComputed.upsert({
+                where: { matchId: match.id },
+                create: {
+                    matchId: match.id,
+                    baseProbUsed,
+                    pHomeImplied: implied.pHomeImplied,
+                    pDrawImplied: implied.pDrawImplied,
+                    pAwayImplied: implied.pAwayImplied,
+                    deltaHome,
+                    deltaAway,
+                },
+                update: {
+                    baseProbUsed,
+                    pHomeImplied: implied.pHomeImplied,
+                    pDrawImplied: implied.pDrawImplied,
+                    pAwayImplied: implied.pAwayImplied,
+                    deltaHome,
+                    deltaAway,
+                },
+            });
+        }
+
+        return matches.length;
+    }
+
     async create(input: CreateMatchInput): Promise<MatchGql> {
         if (input.homeTeamId === input.awayTeamId) {
             throw new BadRequestException('homeTeamId and awayTeamId must be different');
@@ -626,6 +705,12 @@ export class MatchService {
         return this.map(row);
     }
 
+    /**
+     * Update Match pricing only (kHome/kDraw/kAway/total).
+     * Preserves teams, date, marketType, source, externalFixtureId.
+     * Recalculates MatchComputed in the same transaction (derby-aware).
+     * Does not create StrengthSnapshot.
+     */
     async update(input: UpdateMatchInput): Promise<MatchGql> {
         const existing = await this.prisma.match.findUnique({
             where: { id: input.id },
@@ -642,37 +727,28 @@ export class MatchService {
         });
         if (!existing) throw new NotFoundException('Match not found');
 
-        const homeTeamId = input.homeTeamId ?? existing.homeTeamId;
-        const awayTeamId = input.awayTeamId ?? existing.awayTeamId;
-        if (homeTeamId === awayTeamId) {
-            throw new BadRequestException('homeTeamId and awayTeamId must be different');
+        const kHome = input.kHome;
+        const kDraw = input.kDraw;
+        const kAway = input.kAway;
+
+        if (!isFinite(kHome) || !isFinite(kDraw) || !isFinite(kAway)) {
+            throw new BadRequestException('Invalid odds');
+        }
+        if (kHome <= 1 || kDraw <= 1 || kAway <= 1) {
+            throw new BadRequestException('Odds must be > 1');
         }
 
-        // Ensure teams exist & belong to this season
-        const [homeTeam, awayTeam] = await Promise.all([
-            this.prisma.team.findUnique({
-                where: { id: homeTeamId },
-                select: { id: true, seasonId: true },
-            }),
-            this.prisma.team.findUnique({
-                where: { id: awayTeamId },
-                select: { id: true, seasonId: true },
-            }),
-        ]);
-        if (!homeTeam || !awayTeam) throw new NotFoundException('Team not found');
-        if (homeTeam.seasonId !== existing.seasonId || awayTeam.seasonId !== existing.seasonId) {
-            throw new BadRequestException('Teams must belong to the same season as match');
+        const total =
+            input.total === undefined ? existing.total : input.total;
+        if (total != null && (!isFinite(total) || total <= 0)) {
+            throw new BadRequestException('total must be > 0 when set');
         }
-
-        const kHome = input.kHome ?? existing.kHome;
-        const kDraw = input.kDraw ?? existing.kDraw;
-        const kAway = input.kAway ?? existing.kAway;
 
         const { implied, baseProbUsed, deltaHome, deltaAway } = this.computeDerivedForMatch({
             isFootball: existing.season.league.sport.key === SportKey.FOOTBALL,
             derbyMatches: existing.season.derbyMatches,
-            homeTeamId,
-            awayTeamId,
+            homeTeamId: existing.homeTeamId,
+            awayTeamId: existing.awayTeamId,
             kHome,
             kDraw,
             kAway,
@@ -685,14 +761,12 @@ export class MatchService {
                 await tx.match.update({
                     where: { id: input.id },
                     data: {
-                        tourId: input.tourId !== undefined ? input.tourId : undefined,
-                        date: input.date !== undefined ? new Date(input.date) : undefined,
-                        homeTeamId: input.homeTeamId !== undefined ? input.homeTeamId : undefined,
-                        awayTeamId: input.awayTeamId !== undefined ? input.awayTeamId : undefined,
-                        kHome: input.kHome !== undefined ? input.kHome : undefined,
-                        kDraw: input.kDraw !== undefined ? input.kDraw : undefined,
-                        kAway: input.kAway !== undefined ? input.kAway : undefined,
-                        total: input.total !== undefined ? input.total : undefined,
+                        kHome,
+                        kDraw,
+                        kAway,
+                        total: total ?? null,
+                        // Explicitly do not touch: seasonId, teams, date, marketType,
+                        // source, externalFixtureId, tourId.
                     },
                 });
 
@@ -725,9 +799,6 @@ export class MatchService {
 
             return this.map(updated);
         } catch (e: any) {
-            if (e?.code === 'P2002') {
-                throw new ConflictException('Match already exists (same season/date/teams/marketType)');
-            }
             if (e?.code === 'P2025') throw new NotFoundException('Match not found');
             throw e;
         }

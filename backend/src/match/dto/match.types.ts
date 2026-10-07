@@ -78,7 +78,7 @@ export class MatchGql {
     @Field(() => ExternalDataProviderGql, { nullable: true })
     source?: ExternalDataProviderGql | null;
 
-    @Field({ nullable: true })
+    @Field(() => String, { nullable: true })
     externalFixtureId?: string | null;
 
     @Field(() => MatchComputedGql, { nullable: true })

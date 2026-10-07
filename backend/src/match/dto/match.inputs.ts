@@ -1,5 +1,5 @@
 import { Field, Float, ID, InputType } from '@nestjs/graphql';
-import { IsDateString, IsOptional, Min } from 'class-validator';
+import { IsDateString, IsOptional, Min, ValidateIf } from 'class-validator';
 import { MarketTypeGql } from './match.types';
 
 @InputType()
@@ -39,47 +39,36 @@ export class CreateMatchInput {
 
     @Field(() => Float, { nullable: true })
     @IsOptional()
+    @ValidateIf((_, v) => v != null)
+    @Min(0.000001)
     total?: number;
 }
 
+/**
+ * Pricing-only update. Teams / date / marketType / source / externalFixtureId
+ * are intentionally not accepted.
+ */
 @InputType()
 export class UpdateMatchInput {
     @Field(() => ID)
     id: string;
 
-    @Field(() => ID, { nullable: true })
-    @IsOptional()
-    tourId?: string | null;
-
-    @Field({ nullable: true })
-    @IsOptional()
-    @IsDateString()
-    date?: string;
-
-    @Field(() => ID, { nullable: true })
-    @IsOptional()
-    homeTeamId?: string;
-
-    @Field(() => ID, { nullable: true })
-    @IsOptional()
-    awayTeamId?: string;
-
-    @Field(() => Float, { nullable: true })
-    @IsOptional()
+    @Field(() => Float)
     @Min(1.000001)
-    kHome?: number;
+    kHome: number;
 
-    @Field(() => Float, { nullable: true })
-    @IsOptional()
+    @Field(() => Float)
     @Min(1.000001)
-    kDraw?: number;
+    kDraw: number;
 
-    @Field(() => Float, { nullable: true })
-    @IsOptional()
+    @Field(() => Float)
     @Min(1.000001)
-    kAway?: number;
+    kAway: number;
 
+    /** Pass null to clear total. Omit only if GraphQL client sends explicit null. */
     @Field(() => Float, { nullable: true })
     @IsOptional()
+    @ValidateIf((_, v) => v != null)
+    @Min(0.000001)
     total?: number | null;
 }

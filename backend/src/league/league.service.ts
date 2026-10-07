@@ -3,10 +3,14 @@ import { PrismaService } from '../prisma/prisma.service';
 import { SportKey } from '../../generated/prisma';
 import { CreateLeagueInput, UpdateLeagueInput } from './dto/league.inputs';
 import { LeagueGql } from './dto/league.types';
+import { SeasonService } from '../season/season.service';
 
 @Injectable()
 export class LeagueService {
-    constructor(private readonly prisma: PrismaService) { }
+    constructor(
+        private readonly prisma: PrismaService,
+        private readonly seasons: SeasonService,
+    ) { }
 
     private sportNameByKey(key: SportKey): string {
         switch (key) {
@@ -132,7 +136,21 @@ export class LeagueService {
     }
 
     async remove(id: string): Promise<boolean> {
+        const existing = await this.prisma.league.findUnique({
+            where: { id },
+            select: { id: true },
+        });
+        if (!existing) throw new NotFoundException('League not found');
+
         try {
+            const seasons = await this.prisma.season.findMany({
+                where: { leagueId: id },
+                select: { id: true },
+            });
+            for (const s of seasons) {
+                await this.seasons.remove(s.id);
+            }
+
             await this.prisma.league.delete({ where: { id } });
             return true;
         } catch (e: any) {

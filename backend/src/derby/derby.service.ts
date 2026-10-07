@@ -1,12 +1,16 @@
 import { ConflictException, Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { MatchService } from '../match/match.service';
 import { CreateSeasonDerbyMatchInput, UpdateSeasonDerbyMatchInput } from './dto/derby.inputs';
 import { SeasonDerbyMatchGql } from './dto/derby.types';
 import { SportKey } from '../../generated/prisma';
 
 @Injectable()
 export class DerbyService {
-    constructor(private readonly prisma: PrismaService) { }
+    constructor(
+        private readonly prisma: PrismaService,
+        private readonly matches: MatchService,
+    ) { }
 
     private mapToGql(row: any): SeasonDerbyMatchGql {
         return {
@@ -56,17 +60,29 @@ export class DerbyService {
         }
 
         try {
-            const created = await this.prisma.seasonDerbyMatch.create({
-                data: {
-                    seasonId: season.id,
-                    homeTeamId: input.homeTeamId,
-                    awayTeamId: input.awayTeamId,
-                    type: input.type as any,
-                },
-                include: {
-                    homeTeam: true,
-                    awayTeam: true,
-                },
+            // Create derby first, then recalculate so MatchService sees the new pair.
+            const created = await this.prisma.$transaction(async (tx) => {
+                const row = await tx.seasonDerbyMatch.create({
+                    data: {
+                        seasonId: season.id,
+                        homeTeamId: input.homeTeamId,
+                        awayTeamId: input.awayTeamId,
+                        type: input.type as any,
+                    },
+                    include: {
+                        homeTeam: true,
+                        awayTeam: true,
+                    },
+                });
+
+                await this.matches.recalculateDerivedForTeamPair(
+                    season.id,
+                    input.homeTeamId,
+                    input.awayTeamId,
+                    tx,
+                );
+
+                return row;
             });
 
             return this.mapToGql(created);
@@ -131,15 +147,26 @@ export class DerbyService {
         }
 
         try {
-            const updated = await this.prisma.seasonDerbyMatch.update({
-                where: { id: input.id },
-                data: {
-                    type: input.type !== undefined ? (input.type as any) : undefined,
-                },
-                include: {
-                    homeTeam: true,
-                    awayTeam: true,
-                },
+            const updated = await this.prisma.$transaction(async (tx) => {
+                const row = await tx.seasonDerbyMatch.update({
+                    where: { id: input.id },
+                    data: {
+                        type: input.type !== undefined ? (input.type as any) : undefined,
+                    },
+                    include: {
+                        homeTeam: true,
+                        awayTeam: true,
+                    },
+                });
+
+                await this.matches.recalculateDerivedForTeamPair(
+                    existing.seasonId,
+                    existing.homeTeamId,
+                    existing.awayTeamId,
+                    tx,
+                );
+
+                return row;
             });
 
             return this.mapToGql(updated);
@@ -155,13 +182,28 @@ export class DerbyService {
     }
 
     async remove(id: string): Promise<boolean> {
-        try {
-            await this.prisma.seasonDerbyMatch.delete({ where: { id } });
-            return true;
-        } catch (e: any) {
-            if (e?.code === 'P2025') throw new NotFoundException('SeasonDerbyMatch not found');
-            throw e;
-        }
+        const existing = await this.prisma.seasonDerbyMatch.findUnique({
+            where: { id },
+            select: {
+                id: true,
+                seasonId: true,
+                homeTeamId: true,
+                awayTeamId: true,
+            },
+        });
+        if (!existing) throw new NotFoundException('SeasonDerbyMatch not found');
+
+        // Delete derby first, then recalculate so MatchService uses the normal path.
+        await this.prisma.$transaction(async (tx) => {
+            await tx.seasonDerbyMatch.delete({ where: { id: existing.id } });
+            await this.matches.recalculateDerivedForTeamPair(
+                existing.seasonId,
+                existing.homeTeamId,
+                existing.awayTeamId,
+                tx,
+            );
+        });
+
+        return true;
     }
 }
-
