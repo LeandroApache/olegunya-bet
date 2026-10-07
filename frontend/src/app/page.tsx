@@ -55,6 +55,14 @@ export default function HomePage() {
   // create form state
   const [leagueName, setLeagueName] = useState("");
   const [country, setCountry] = useState("");
+  const [leagueSearch, setLeagueSearch] = useState("");
+
+  const filteredLeagues = useMemo(() => {
+    const list = leaguesQ.data ?? [];
+    const q = leagueSearch.trim().toLowerCase();
+    if (!q) return list;
+    return list.filter((l) => l.name.toLowerCase().includes(q));
+  }, [leaguesQ.data, leagueSearch]);
 
   const createM = useMutation({
     mutationFn: async () => {
@@ -167,6 +175,13 @@ export default function HomePage() {
           Leagues {effectiveSportKey ? `(${effectiveSportKey})` : ""}
         </div>
 
+        <Input
+          value={leagueSearch}
+          onChange={(e) => setLeagueSearch(e.target.value)}
+          placeholder="Search leagues by name…"
+          className="max-w-md"
+        />
+
         {leaguesQ.isLoading && <div className="text-sm text-muted-foreground">Loading leagues…</div>}
 
         {leaguesQ.isError && (
@@ -179,6 +194,15 @@ export default function HomePage() {
           <div className="text-sm text-muted-foreground">No leagues yet.</div>
         )}
 
+        {!leaguesQ.isLoading &&
+          (leaguesQ.data?.length ?? 0) > 0 &&
+          filteredLeagues.length === 0 &&
+          leagueSearch.trim() && (
+            <div className="text-sm text-muted-foreground">
+              No leagues found for “{leagueSearch.trim()}”.
+            </div>
+          )}
+
         {deleteLeagueM.isError && (
           <div className="text-sm text-red-600">
             {(deleteLeagueM.error as any)?.response?.errors?.[0]?.message ??
@@ -188,7 +212,7 @@ export default function HomePage() {
         )}
 
         <div className="space-y-2">
-          {leaguesQ.data?.map((l: League) => (
+          {filteredLeagues.map((l: League) => (
             <div
               key={l.id}
               className="rounded-xl border p-3 flex flex-wrap items-start justify-between gap-3"

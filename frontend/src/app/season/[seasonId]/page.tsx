@@ -152,6 +152,7 @@ export default function SeasonPage() {
         queryFn: () => seasonDerbyMatchesQuery(seasonId),
     });
 
+    const [derbyOpen, setDerbyOpen] = useState(false);
     const [derbyHomeTeamId, setDerbyHomeTeamId] = useState<string | undefined>(undefined);
     const [derbyAwayTeamId, setDerbyAwayTeamId] = useState<string | undefined>(undefined);
     const [derbyRecalcNotice, setDerbyRecalcNotice] = useState<string | null>(null);
@@ -194,6 +195,7 @@ export default function SeasonPage() {
     });
 
     // ===== MATCHES =====
+    const [matchesOpen, setMatchesOpen] = useState(true);
     const [matchesPage, setMatchesPage] = useState(1);
     const matchesPageSize = 10;
 
@@ -622,94 +624,129 @@ export default function SeasonPage() {
 
             {/* ===== DERBY MATCHES ===== */}
             <div className="rounded-2xl border p-4 space-y-4">
-                <div className="text-sm font-medium">Derby matches (football only)</div>
-
-                <div className="grid gap-3 md:grid-cols-4">
-                    <Select value={derbyHomeTeamId} onValueChange={setDerbyHomeTeamId}>
-                        <SelectTrigger>
-                            <SelectValue placeholder="Home team" />
-                        </SelectTrigger>
-                        <SelectContent>
-                            {sortedTeams.map((t) => (
-                                <SelectItem key={t.id} value={t.id}>
-                                    {t.name}
-                                </SelectItem>
-                            ))}
-                        </SelectContent>
-                    </Select>
-
-                    <Select value={derbyAwayTeamId} onValueChange={setDerbyAwayTeamId}>
-                        <SelectTrigger>
-                            <SelectValue placeholder="Away team" />
-                        </SelectTrigger>
-                        <SelectContent>
-                            {sortedTeams.map((t) => (
-                                <SelectItem key={t.id} value={t.id}>
-                                    {t.name}
-                                </SelectItem>
-                            ))}
-                        </SelectContent>
-                    </Select>
-
-                    <div className="text-sm text-muted-foreground flex items-center">
-                        Type: <span className="ml-1 font-medium">DERBY</span>
+                <div className="flex items-center justify-between gap-3">
+                    <div className="text-sm font-medium">
+                        Derby matches (football only)
+                        {!derbyOpen && derbyQ.data && (
+                            <span className="text-muted-foreground ml-2">
+                                ({derbyQ.data.length})
+                            </span>
+                        )}
                     </div>
-
                     <Button
-                        onClick={() => createDerbyM.mutate()}
-                        disabled={createDerbyM.isPending || !sortedTeams.length}
+                        variant="ghost"
+                        size="xs"
+                        className="gap-1"
+                        onClick={() => setDerbyOpen((v) => !v)}
                     >
-                        {createDerbyM.isPending ? "Saving…" : "Add derby"}
+                        {derbyOpen ? (
+                            <>
+                                Hide
+                                <ChevronUpIcon className="size-4" />
+                            </>
+                        ) : (
+                            <>
+                                Show
+                                <ChevronDownIcon className="size-4" />
+                            </>
+                        )}
                     </Button>
                 </div>
 
-                {createDerbyM.isError && (
-                    <div className="text-sm text-red-600">
-                        {(createDerbyM.error as any)?.response?.errors?.[0]?.message ??
-                            (createDerbyM.error as any)?.message ??
-                            "Create derby failed"}
-                    </div>
-                )}
+                {derbyOpen && (
+                    <>
+                        <div className="grid gap-3 md:grid-cols-4">
+                            <Select value={derbyHomeTeamId} onValueChange={setDerbyHomeTeamId}>
+                                <SelectTrigger>
+                                    <SelectValue placeholder="Home team" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {sortedTeams.map((t) => (
+                                        <SelectItem key={t.id} value={t.id}>
+                                            {t.name}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
 
-                {derbyRecalcNotice && (
-                    <div className="text-sm text-muted-foreground">{derbyRecalcNotice}</div>
-                )}
+                            <Select value={derbyAwayTeamId} onValueChange={setDerbyAwayTeamId}>
+                                <SelectTrigger>
+                                    <SelectValue placeholder="Away team" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {sortedTeams.map((t) => (
+                                        <SelectItem key={t.id} value={t.id}>
+                                            {t.name}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
 
-                {derbyQ.isLoading && (
-                    <div className="text-sm text-muted-foreground">Loading derby matches…</div>
-                )}
-                {derbyQ.isError && (
-                    <div className="text-sm text-red-600">
-                        {(derbyQ.error as any)?.response?.errors?.[0]?.message ??
-                            "Failed to load derby matches"}
-                    </div>
-                )}
-
-                {derbyQ.data && derbyQ.data.length > 0 && (
-                    <div className="space-y-2">
-                        {(derbyQ.data as SeasonDerbyMatch[]).map((d) => (
-                            <div
-                                key={d.id}
-                                className="rounded-xl border p-3 flex items-center justify-between gap-3"
-                            >
-                                <div>
-                                    <div className="font-medium">
-                                        {d.homeTeamName} — {d.awayTeamName}
-                                    </div>
-                                    <div className="text-xs text-muted-foreground">
-                                        {d.type}
-                                    </div>
-                                </div>
-                                <Button
-                                    variant="destructive"
-                                    onClick={() => deleteDerbyM.mutate(d.id)}
-                                    disabled={deleteDerbyM.isPending}
-                                >
-                                    Delete
-                                </Button>
+                            <div className="text-sm text-muted-foreground flex items-center">
+                                Type: <span className="ml-1 font-medium">DERBY</span>
                             </div>
-                        ))}
-                    </div>
+
+                            <Button
+                                onClick={() => createDerbyM.mutate()}
+                                disabled={createDerbyM.isPending || !sortedTeams.length}
+                            >
+                                {createDerbyM.isPending ? "Saving…" : "Add derby"}
+                            </Button>
+                        </div>
+
+                        {createDerbyM.isError && (
+                            <div className="text-sm text-red-600">
+                                {(createDerbyM.error as any)?.response?.errors?.[0]?.message ??
+                                    (createDerbyM.error as any)?.message ??
+                                    "Create derby failed"}
+                            </div>
+                        )}
+
+                        {derbyRecalcNotice && (
+                            <div className="text-sm text-muted-foreground">
+                                {derbyRecalcNotice}
+                            </div>
+                        )}
+
+                        {derbyQ.isLoading && (
+                            <div className="text-sm text-muted-foreground">
+                                Loading derby matches…
+                            </div>
+                        )}
+                        {derbyQ.isError && (
+                            <div className="text-sm text-red-600">
+                                {(derbyQ.error as any)?.response?.errors?.[0]?.message ??
+                                    "Failed to load derby matches"}
+                            </div>
+                        )}
+
+                        {derbyQ.data && derbyQ.data.length > 0 && (
+                            <div className="space-y-2">
+                                {(derbyQ.data as SeasonDerbyMatch[]).map((d) => (
+                                    <div
+                                        key={d.id}
+                                        className="rounded-xl border p-3 flex items-center justify-between gap-3"
+                                    >
+                                        <div>
+                                            <div className="font-medium">
+                                                {d.homeTeamName} — {d.awayTeamName}
+                                            </div>
+                                            <div className="text-xs text-muted-foreground">
+                                                {d.type}
+                                            </div>
+                                        </div>
+                                        <Button
+                                            variant="destructive"
+                                            onClick={() => deleteDerbyM.mutate(d.id)}
+                                            disabled={deleteDerbyM.isPending}
+                                        >
+                                            Delete
+                                        </Button>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </>
                 )}
             </div>
 
@@ -845,8 +882,37 @@ export default function SeasonPage() {
 
             {/* ===== MATCHES ===== */}
             <div className="rounded-2xl border p-4 space-y-4">
-                <div className="text-sm font-medium">Matches</div>
+                <div className="flex items-center justify-between gap-3">
+                    <div className="text-sm font-medium">
+                        Matches
+                        {!matchesOpen && matchesQ.data && (
+                            <span className="text-muted-foreground ml-2">
+                                ({matchesQ.data.totalCount})
+                            </span>
+                        )}
+                    </div>
+                    <Button
+                        variant="ghost"
+                        size="xs"
+                        className="gap-1"
+                        onClick={() => setMatchesOpen((v) => !v)}
+                    >
+                        {matchesOpen ? (
+                            <>
+                                Hide
+                                <ChevronUpIcon className="size-4" />
+                            </>
+                        ) : (
+                            <>
+                                Show
+                                <ChevronDownIcon className="size-4" />
+                            </>
+                        )}
+                    </Button>
+                </div>
 
+                {matchesOpen && (
+                    <>
                 {/* Last created match info */}
                 {lastCreatedMatch && (
                     <div className="rounded-xl border p-3 bg-muted/30">
@@ -1134,6 +1200,8 @@ export default function SeasonPage() {
                             </Button>
                         </div>
                     </div>
+                )}
+                    </>
                 )}
             </div>
 
