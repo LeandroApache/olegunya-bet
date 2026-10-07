@@ -269,44 +269,48 @@ export class OddsPapiService {
     let mappingsCreated = 0;
     let alreadyMapped = 0;
 
-    await this.prisma.$transaction(async (tx) => {
-      for (const p of participants) {
-        if (ctx.teamByParticipant.has(p.externalParticipantId)) {
-          alreadyMapped += 1;
-          continue;
+    // Many participants ⇒ many sequential writes; default 5s interactive timeout is too short for VHL-sized catalogs.
+    await this.prisma.$transaction(
+      async (tx) => {
+        for (const p of participants) {
+          if (ctx.teamByParticipant.has(p.externalParticipantId)) {
+            alreadyMapped += 1;
+            continue;
+          }
+
+          const name = this.cleanTeamName(p.externalName);
+          if (!name) {
+            throw new BadRequestException(
+              `OddsPapi participant ${p.externalParticipantId} has an empty name`,
+            );
+          }
+
+          const team = await tx.team.create({
+            data: {
+              seasonId: input.seasonId,
+              name,
+              aliases: [],
+            },
+          });
+          teamsCreated += 1;
+
+          await tx.externalTeamMapping.create({
+            data: {
+              provider: this.provider,
+              seasonId: input.seasonId,
+              teamId: team.id,
+              externalParticipantId: p.externalParticipantId,
+              externalName: p.externalName || null,
+            },
+          });
+          mappingsCreated += 1;
+
+          // Keep in-memory set so duplicate participant rows in the same batch stay unique.
+          ctx.teamByParticipant.set(p.externalParticipantId, { teamId: team.id });
         }
-
-        const name = this.cleanTeamName(p.externalName);
-        if (!name) {
-          throw new BadRequestException(
-            `OddsPapi participant ${p.externalParticipantId} has an empty name`,
-          );
-        }
-
-        const team = await tx.team.create({
-          data: {
-            seasonId: input.seasonId,
-            name,
-            aliases: [],
-          },
-        });
-        teamsCreated += 1;
-
-        await tx.externalTeamMapping.create({
-          data: {
-            provider: this.provider,
-            seasonId: input.seasonId,
-            teamId: team.id,
-            externalParticipantId: p.externalParticipantId,
-            externalName: p.externalName || null,
-          },
-        });
-        mappingsCreated += 1;
-
-        // Keep in-memory set so duplicate participant rows in the same batch stay unique.
-        ctx.teamByParticipant.set(p.externalParticipantId, { teamId: team.id });
-      }
-    });
+      },
+      { maxWait: 10_000, timeout: 120_000 },
+    );
 
     return {
       participantsFound: participants.length,
