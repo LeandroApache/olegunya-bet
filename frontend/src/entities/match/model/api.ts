@@ -164,13 +164,9 @@ export const createMatchMutation = async (input: {
 
 export const updateMatchMutation = async (input: {
     id: string;
-    tourId?: string | null;
-    date?: string;
-    homeTeamId?: string;
-    awayTeamId?: string;
-    kHome?: number;
-    kDraw?: number;
-    kAway?: number;
+    kHome: number;
+    kDraw: number;
+    kAway: number;
     total?: number | null;
 }): Promise<Match> => {
     const query = /* GraphQL */ `

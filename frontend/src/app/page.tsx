@@ -15,7 +15,12 @@ import {
 } from "@/components/ui/select";
 
 import { sportsQuery, type SportKey } from "@/entities/sport";
-import { createLeagueMutation, leaguesQuery, type League } from "@/entities/league";
+import {
+  createLeagueMutation,
+  deleteLeagueMutation,
+  leaguesQuery,
+  type League,
+} from "@/entities/league";
 import { useAuth } from "@/entities/auth";
 
 export default function HomePage() {
@@ -68,6 +73,21 @@ export default function HomePage() {
       await qc.invalidateQueries({ queryKey: ["leagues", effectiveSportKey] });
     },
   });
+
+  const deleteLeagueM = useMutation({
+    mutationFn: async (id: string) => deleteLeagueMutation(id),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["leagues", effectiveSportKey] });
+    },
+  });
+
+  const requestDeleteLeague = (l: League) => {
+    const ok = window.confirm(
+      `Delete league "${l.name}"?\n\nAll seasons inside it (and their matches/teams) will be permanently deleted.`,
+    );
+    if (!ok) return;
+    deleteLeagueM.mutate(l.id);
+  };
 
   return (
     <div className="min-h-screen p-6 space-y-6">
@@ -159,18 +179,35 @@ export default function HomePage() {
           <div className="text-sm text-muted-foreground">No leagues yet.</div>
         )}
 
+        {deleteLeagueM.isError && (
+          <div className="text-sm text-red-600">
+            {(deleteLeagueM.error as any)?.response?.errors?.[0]?.message ??
+              (deleteLeagueM.error as any)?.message ??
+              "Failed to delete league"}
+          </div>
+        )}
+
         <div className="space-y-2">
           {leaguesQ.data?.map((l: League) => (
-            <Link
+            <div
               key={l.id}
-              href={`/league/${l.id}`}
-              className="block rounded-xl border p-3 hover:bg-accent transition"
+              className="rounded-xl border p-3 flex flex-wrap items-start justify-between gap-3"
             >
-              <div className="font-medium">{l.name}</div>
-              <div className="text-sm text-muted-foreground">
-                {l.country ?? "—"} • {l.id}
-              </div>
-            </Link>
+              <Link href={`/league/${l.id}`} className="min-w-0 hover:underline">
+                <div className="font-medium">{l.name}</div>
+                <div className="text-sm text-muted-foreground">
+                  {l.country ?? "—"} • {l.id}
+                </div>
+              </Link>
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={() => requestDeleteLeague(l)}
+                disabled={deleteLeagueM.isPending}
+              >
+                Delete
+              </Button>
+            </div>
           ))}
         </div>
       </div>

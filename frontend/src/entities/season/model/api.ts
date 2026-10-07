@@ -17,6 +17,23 @@ export const seasonsQuery = async (leagueId: string): Promise<Season[]> => {
     return res.seasons;
 };
 
+export const seasonQuery = async (id: string): Promise<Season> => {
+    const query = /* GraphQL */ `
+    query Season($id: ID!) {
+      season(id: $id) {
+        id
+        leagueId
+        leagueName
+        name
+        baseCoefHomeEqual
+        flipCoef
+      }
+    }
+  `;
+    const res = await gqlClient().request<{ season: Season }>(query, { id });
+    return res.season;
+};
+
 export const createSeasonMutation = async (input: {
     leagueId: string;
     name: string;
@@ -36,4 +53,14 @@ export const createSeasonMutation = async (input: {
   `;
     const res = await gqlClient().request<{ createSeason: Season }>(query, { input });
     return res.createSeason;
+};
+
+export const deleteSeasonMutation = async (id: string): Promise<boolean> => {
+    const query = /* GraphQL */ `
+    mutation DeleteSeason($id: ID!) {
+      deleteSeason(id: $id)
+    }
+  `;
+    const res = await gqlClient().request<{ deleteSeason: boolean }>(query, { id });
+    return res.deleteSeason;
 };

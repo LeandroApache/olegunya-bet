@@ -1,6 +1,7 @@
 "use client";
 
-import { useParams } from "next/navigation";
+import Link from "next/link";
+import { useParams, useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { ChevronDownIcon, ChevronUpIcon } from "lucide-react";
@@ -28,6 +29,7 @@ import {
     deleteMatchMutation,
     matchesPaginatedQuery,
     matchesQuery,
+    updateMatchMutation,
     type Match,
 } from "@/entities/match";
 import {
@@ -41,6 +43,8 @@ import {
     deleteSeasonDerbyMatchMutation,
     type SeasonDerbyMatch,
 } from "@/entities/derby";
+import { OddsPapiImportSection } from "@/entities/odds-papi";
+import { deleteSeasonMutation, seasonQuery } from "@/entities/season";
 
 function toLocalDateInputValue(d = new Date()) {
     // YYYY-MM-DD
@@ -57,8 +61,14 @@ function localDateToIso(dateStr: string) {
 export default function SeasonPage() {
     const params = useParams<{ seasonId: string }>();
     const seasonId = params.seasonId;
+    const router = useRouter();
 
     const qc = useQueryClient();
+
+    const seasonQ = useQuery({
+        queryKey: ["season", seasonId],
+        queryFn: () => seasonQuery(seasonId),
+    });
 
     // ===== TEAMS =====
     const [teamsExpanded, setTeamsExpanded] = useState(false);
@@ -144,6 +154,18 @@ export default function SeasonPage() {
 
     const [derbyHomeTeamId, setDerbyHomeTeamId] = useState<string | undefined>(undefined);
     const [derbyAwayTeamId, setDerbyAwayTeamId] = useState<string | undefined>(undefined);
+    const [derbyRecalcNotice, setDerbyRecalcNotice] = useState<string | null>(null);
+
+    const refreshAfterDerbyMutation = async () => {
+        await Promise.all([
+            qc.invalidateQueries({ queryKey: ["seasonDerbyMatches", seasonId] }),
+            qc.invalidateQueries({ queryKey: ["matches", seasonId] }),
+            qc.invalidateQueries({ queryKey: ["allMatches", seasonId] }),
+        ]);
+        setDerbyRecalcNotice(
+            "Derby updated. Existing match calculations were recalculated. Recalculate Strength to update the current ratings.",
+        );
+    };
 
     const createDerbyM = useMutation({
         mutationFn: async () => {
@@ -160,14 +182,14 @@ export default function SeasonPage() {
         onSuccess: async () => {
             setDerbyHomeTeamId(undefined);
             setDerbyAwayTeamId(undefined);
-            await qc.invalidateQueries({ queryKey: ["seasonDerbyMatches", seasonId] });
+            await refreshAfterDerbyMutation();
         },
     });
 
     const deleteDerbyM = useMutation({
         mutationFn: async (id: string) => deleteSeasonDerbyMatchMutation(id),
         onSuccess: async () => {
-            await qc.invalidateQueries({ queryKey: ["seasonDerbyMatches", seasonId] });
+            await refreshAfterDerbyMutation();
         },
     });
 
@@ -198,6 +220,29 @@ export default function SeasonPage() {
 
     // Track last created match
     const [lastCreatedMatch, setLastCreatedMatch] = useState<Match | null>(null);
+    const [matchEditNotice, setMatchEditNotice] = useState<string | null>(null);
+    const [editingMatchId, setEditingMatchId] = useState<string | null>(null);
+    const [editKHome, setEditKHome] = useState("");
+    const [editKDraw, setEditKDraw] = useState("");
+    const [editKAway, setEditKAway] = useState("");
+    const [editTotal, setEditTotal] = useState("");
+
+    const beginEditMatch = (m: Match) => {
+        setEditingMatchId(m.id);
+        setEditKHome(String(m.kHome));
+        setEditKDraw(String(m.kDraw));
+        setEditKAway(String(m.kAway));
+        setEditTotal(m.total != null ? String(m.total) : "");
+        setMatchEditNotice(null);
+    };
+
+    const cancelEditMatch = () => {
+        setEditingMatchId(null);
+        setEditKHome("");
+        setEditKDraw("");
+        setEditKAway("");
+        setEditTotal("");
+    };
 
     const createMatchM = useMutation({
         mutationFn: async () => {
@@ -248,15 +293,91 @@ export default function SeasonPage() {
         },
     });
 
+    const requestDeleteMatch = (m: Match) => {
+        const ok = window.confirm(
+            `Delete match?\n\n${m.homeTeamName} vs ${m.awayTeamName}\n${new Date(m.date).toISOString().slice(0, 10)}\n\nThis cannot be undone.`,
+        );
+        if (!ok) return;
+        deleteMatchM.mutate(m.id);
+    };
+
+    const deleteSeasonM = useMutation({
+        mutationFn: async () => deleteSeasonMutation(seasonId),
+        onSuccess: async () => {
+            const leagueId = seasonQ.data?.leagueId;
+            await qc.invalidateQueries({ queryKey: ["seasons"] });
+            if (leagueId) {
+                router.push(`/league/${leagueId}`);
+            } else {
+                router.push("/");
+            }
+        },
+    });
+
+    const requestDeleteSeason = () => {
+        const name = seasonQ.data?.name ?? "this season";
+        const ok = window.confirm(
+            `Delete season "${name}"?\n\nAll teams, matches, mappings and strength snapshots in this season will be permanently deleted.`,
+        );
+        if (!ok) return;
+        deleteSeasonM.mutate();
+    };
+
+    const updateMatchM = useMutation({
+        mutationFn: async () => {
+            if (!editingMatchId) throw new Error("No match selected");
+            const kh = Number(editKHome);
+            const kd = Number(editKDraw);
+            const ka = Number(editKAway);
+            if (!isFinite(kh) || !isFinite(kd) || !isFinite(ka)) throw new Error("Invalid odds");
+            if (kh <= 1 || kd <= 1 || ka <= 1) throw new Error("Odds must be > 1");
+
+            const tot = editTotal.trim() ? Number(editTotal) : null;
+            if (editTotal.trim() && (!isFinite(tot as number) || (tot as number) <= 0)) {
+                throw new Error("Invalid total");
+            }
+
+            return updateMatchMutation({
+                id: editingMatchId,
+                kHome: kh,
+                kDraw: kd,
+                kAway: ka,
+                total: tot,
+            });
+        },
+        onSuccess: async () => {
+            await Promise.all([
+                qc.invalidateQueries({ queryKey: ["matches", seasonId] }),
+                qc.invalidateQueries({ queryKey: ["allMatches", seasonId] }),
+            ]);
+            cancelEditMatch();
+            setMatchEditNotice(
+                "Match updated. Match calculation was recalculated. Recalculate Strength to update the current ratings.",
+            );
+        },
+    });
+
+    const [matchSearch, setMatchSearch] = useState("");
+
     const sortedMatches = useMemo(() => {
-        const list = matchesQ.data?.matches ?? [];
-        // Sort by createdAt descending (newest first) so last added match is always at the top
-        return [...list].sort((a, b) => {
+        const q = matchSearch.trim().toLowerCase();
+        // Search across all season matches so wrong totals are findable beyond the current page.
+        const list = q
+            ? (allMatchesQ.data ?? [])
+            : (matchesQ.data?.matches ?? []);
+        const filtered = q
+            ? list.filter((m) => {
+                  const hay =
+                      `${m.homeTeamName} ${m.awayTeamName}`.toLowerCase();
+                  return hay.includes(q);
+              })
+            : list;
+        return [...filtered].sort((a, b) => {
             const dateA = new Date(a.createdAt).getTime();
             const dateB = new Date(b.createdAt).getTime();
-            return dateB - dateA; // Descending order (newest first)
+            return dateB - dateA;
         });
-    }, [matchesQ.data]);
+    }, [matchSearch, allMatchesQ.data, matchesQ.data]);
 
     /** Выбранные в форме матча команды совпадают с парой из списка дерби (порядок не важен). */
     const matchFormIsDerby = useMemo(() => {
@@ -272,7 +393,7 @@ export default function SeasonPage() {
     // ===== STRENGTH =====
     const [fromDate, setFromDate] = useState(""); // YYYY-MM-DD
     const [toDate, setToDate] = useState("");     // YYYY-MM-DD
-    const [halfLifeDays, setHalfLifeDays] = useState("30"); // optional
+    const [halfLifeDays, setHalfLifeDays] = useState(""); // optional
 
     const [snapshot, setSnapshot] = useState<StrengthSnapshot | null>(null);
 
@@ -315,6 +436,8 @@ export default function SeasonPage() {
             setOddsHomeTeamId(undefined);
             setOddsAwayTeamId(undefined);
             setCalculatedOdds(null);
+            setMatchEditNotice(null);
+            setDerbyRecalcNotice(null);
         },
     });
 
@@ -461,7 +584,41 @@ export default function SeasonPage() {
 
     return (
         <div className="min-h-screen p-6 space-y-6">
-            <div className="text-xl font-semibold">Season</div>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                    <div className="text-xl font-semibold">
+                        {seasonQ.data?.name ? `Season · ${seasonQ.data.name}` : "Season"}
+                    </div>
+                    {seasonQ.data?.leagueName && (
+                        <div className="text-sm text-muted-foreground mt-0.5">
+                            {seasonQ.data.leagueName}
+                        </div>
+                    )}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                    {seasonQ.data?.leagueId && (
+                        <Button variant="outline" size="sm" asChild>
+                            <Link href={`/league/${seasonQ.data.leagueId}`}>Back to league</Link>
+                        </Button>
+                    )}
+                    <Button
+                        variant="destructive"
+                        size="sm"
+                        onClick={requestDeleteSeason}
+                        disabled={deleteSeasonM.isPending || seasonQ.isLoading}
+                    >
+                        {deleteSeasonM.isPending ? "Deleting…" : "Delete season"}
+                    </Button>
+                </div>
+            </div>
+
+            {deleteSeasonM.isError && (
+                <div className="text-sm text-red-600">
+                    {(deleteSeasonM.error as any)?.response?.errors?.[0]?.message ??
+                        (deleteSeasonM.error as any)?.message ??
+                        "Failed to delete season"}
+                </div>
+            )}
 
             {/* ===== DERBY MATCHES ===== */}
             <div className="rounded-2xl border p-4 space-y-4">
@@ -512,6 +669,10 @@ export default function SeasonPage() {
                             (createDerbyM.error as any)?.message ??
                             "Create derby failed"}
                     </div>
+                )}
+
+                {derbyRecalcNotice && (
+                    <div className="text-sm text-muted-foreground">{derbyRecalcNotice}</div>
                 )}
 
                 {derbyQ.isLoading && (
@@ -679,6 +840,9 @@ export default function SeasonPage() {
                 )}
             </div>
 
+            {/* ===== ODDSPAPI IMPORT ===== */}
+            <OddsPapiImportSection seasonId={seasonId} teams={sortedTeams} />
+
             {/* ===== MATCHES ===== */}
             <div className="rounded-2xl border p-4 space-y-4">
                 <div className="text-sm font-medium">Matches</div>
@@ -773,47 +937,170 @@ export default function SeasonPage() {
                 )}
 
                 {/* List */}
-                {matchesQ.isLoading && <div className="text-sm text-muted-foreground">Loading…</div>}
+                <div className="space-y-1 max-w-lg">
+                    <Input
+                        value={matchSearch}
+                        onChange={(e) => setMatchSearch(e.target.value)}
+                        placeholder="Search by team name…"
+                    />
+                    {matchSearch.trim() && (
+                        <div className="text-xs text-muted-foreground">
+                            {sortedMatches.length} match
+                            {sortedMatches.length === 1 ? "" : "es"} found
+                        </div>
+                    )}
+                </div>
+
+                {matchesQ.isLoading && !matchSearch.trim() && (
+                    <div className="text-sm text-muted-foreground">Loading…</div>
+                )}
+                {allMatchesQ.isLoading && matchSearch.trim() && (
+                    <div className="text-sm text-muted-foreground">Loading…</div>
+                )}
                 {matchesQ.isError && (
                     <div className="text-sm text-red-600">
                         {(matchesQ.error as any)?.response?.errors?.[0]?.message ?? "Failed to load matches"}
                     </div>
                 )}
 
+                {matchEditNotice && (
+                    <div
+                        role="status"
+                        className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-950 dark:border-amber-400/30 dark:bg-amber-400/10 dark:text-amber-50"
+                    >
+                        {matchEditNotice}
+                    </div>
+                )}
+
                 <div className="space-y-2">
+                    {matchSearch.trim() &&
+                        !allMatchesQ.isLoading &&
+                        sortedMatches.length === 0 && (
+                            <div className="text-sm text-muted-foreground">
+                                No matches found for “{matchSearch.trim()}”.
+                            </div>
+                        )}
                     {sortedMatches.map((m: Match) => (
                         <div key={m.id} className="rounded-xl border p-3">
-                            <div className="flex items-start justify-between gap-3">
-                                <div>
-                                    <div className="font-medium">
-                                        {m.homeTeamName} — {m.awayTeamName}
-                                    </div>
-                                    <div className="text-sm text-muted-foreground">
-                                        {new Date(m.date).toISOString().slice(0, 10)} • k: {m.kHome} / {m.kDraw} / {m.kAway}
-                                        {m.total ? ` • total: ${m.total}` : ""}
+                            {editingMatchId === m.id ? (
+                                <div className="space-y-3">
+                                    <div>
+                                        <div className="text-xs text-muted-foreground">Teams (read-only)</div>
+                                        <div className="font-medium mt-0.5">
+                                            {m.homeTeamName}
+                                            <div className="text-xs text-muted-foreground font-normal">vs</div>
+                                            {m.awayTeamName}
+                                        </div>
+                                        <div className="text-sm text-muted-foreground mt-1">
+                                            {new Date(m.date).toISOString().slice(0, 10)}
+                                        </div>
                                     </div>
 
-                                    {m.computed && (
-                                        <div className="text-sm mt-2">
-                                            <div className="text-muted-foreground">
-                                                implied pHome: {(m.computed.pHomeImplied * 100).toFixed(2)}% • base:{" "}
-                                                {m.computed.baseProbUsed.toFixed(2)}%
-                                            </div>
-                                            <div>
-                                                deltaHome: <span className="font-medium">{m.computed.deltaHome.toFixed(3)}</span>
-                                            </div>
+                                    <div className="grid gap-2 sm:grid-cols-2 md:grid-cols-4">
+                                        <div className="space-y-1">
+                                            <div className="text-xs text-muted-foreground">Home odds</div>
+                                            <Input
+                                                value={editKHome}
+                                                onChange={(e) => setEditKHome(e.target.value)}
+                                            />
+                                        </div>
+                                        <div className="space-y-1">
+                                            <div className="text-xs text-muted-foreground">Draw odds</div>
+                                            <Input
+                                                value={editKDraw}
+                                                onChange={(e) => setEditKDraw(e.target.value)}
+                                            />
+                                        </div>
+                                        <div className="space-y-1">
+                                            <div className="text-xs text-muted-foreground">Away odds</div>
+                                            <Input
+                                                value={editKAway}
+                                                onChange={(e) => setEditKAway(e.target.value)}
+                                            />
+                                        </div>
+                                        <div className="space-y-1">
+                                            <div className="text-xs text-muted-foreground">Total</div>
+                                            <Input
+                                                value={editTotal}
+                                                onChange={(e) => setEditTotal(e.target.value)}
+                                                placeholder="optional"
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div className="flex flex-wrap gap-2">
+                                        <Button
+                                            size="sm"
+                                            onClick={() => updateMatchM.mutate()}
+                                            disabled={updateMatchM.isPending}
+                                        >
+                                            {updateMatchM.isPending ? "Saving…" : "Save"}
+                                        </Button>
+                                        <Button
+                                            size="sm"
+                                            variant="outline"
+                                            onClick={cancelEditMatch}
+                                            disabled={updateMatchM.isPending}
+                                        >
+                                            Cancel
+                                        </Button>
+                                    </div>
+
+                                    {updateMatchM.isError && (
+                                        <div className="text-sm text-red-600">
+                                            {(updateMatchM.error as any)?.response?.errors?.[0]?.message ??
+                                                (updateMatchM.error as any)?.message ??
+                                                "Update failed"}
                                         </div>
                                     )}
                                 </div>
+                            ) : (
+                                <div className="flex items-start justify-between gap-3">
+                                    <div>
+                                        <div className="font-medium">
+                                            {m.homeTeamName} — {m.awayTeamName}
+                                        </div>
+                                        <div className="text-sm text-muted-foreground">
+                                            {new Date(m.date).toISOString().slice(0, 10)} • k: {m.kHome} / {m.kDraw} / {m.kAway}
+                                            {m.total != null ? ` • total: ${m.total}` : ""}
+                                        </div>
 
-                                <Button
-                                    variant="destructive"
-                                    onClick={() => deleteMatchM.mutate(m.id)}
-                                    disabled={deleteMatchM.isPending}
-                                >
-                                    Delete
-                                </Button>
-                            </div>
+                                        {m.computed && (
+                                            <div className="text-sm mt-2">
+                                                <div className="text-muted-foreground">
+                                                    implied pHome: {(m.computed.pHomeImplied * 100).toFixed(2)}% • base:{" "}
+                                                    {m.computed.baseProbUsed.toFixed(2)}%
+                                                </div>
+                                                <div>
+                                                    deltaHome:{" "}
+                                                    <span className="font-medium">
+                                                        {m.computed.deltaHome.toFixed(3)}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    <div className="flex flex-wrap gap-2 shrink-0">
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={() => beginEditMatch(m)}
+                                            disabled={updateMatchM.isPending || deleteMatchM.isPending}
+                                        >
+                                            Edit
+                                        </Button>
+                                        <Button
+                                            variant="destructive"
+                                            size="sm"
+                                            onClick={() => requestDeleteMatch(m)}
+                                            disabled={deleteMatchM.isPending}
+                                        >
+                                            Delete
+                                        </Button>
+                                    </div>
+                                </div>
+                            )}
 
                             {deleteMatchM.isError && (
                                 <div className="text-sm text-red-600 mt-2">
@@ -824,8 +1111,8 @@ export default function SeasonPage() {
                     ))}
                 </div>
 
-                {/* Pagination */}
-                {matchesQ.data && matchesQ.data.totalPages > 1 && (
+                {/* Pagination (hidden while searching across all matches) */}
+                {!matchSearch.trim() && matchesQ.data && matchesQ.data.totalPages > 1 && (
                     <div className="flex items-center justify-between gap-4 pt-4 border-t">
                         <div className="text-sm text-muted-foreground">
                             Page {matchesQ.data.page} of {matchesQ.data.totalPages} ({matchesQ.data.totalCount} total)

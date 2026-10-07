@@ -1,18 +1,25 @@
 "use client";
 
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { createSeasonMutation, seasonsQuery } from "@/entities/season";
+import { createSeasonMutation, deleteSeasonMutation, seasonsQuery } from "@/entities/season";
+import { deleteLeagueMutation, leagueQuery } from "@/entities/league";
 
 export default function LeaguePage() {
     const params = useParams<{ leagueId: string }>();
     const leagueId = params.leagueId;
+    const router = useRouter();
     const qc = useQueryClient();
+
+    const leagueQ = useQuery({
+        queryKey: ["league", leagueId],
+        queryFn: () => leagueQuery(leagueId),
+    });
 
     const seasonsQ = useQuery({
         queryKey: ["seasons", leagueId],
@@ -43,14 +50,73 @@ export default function LeaguePage() {
         },
     });
 
+    const deleteSeasonM = useMutation({
+        mutationFn: async (id: string) => deleteSeasonMutation(id),
+        onSuccess: async () => {
+            await qc.invalidateQueries({ queryKey: ["seasons", leagueId] });
+        },
+    });
+
+    const deleteLeagueM = useMutation({
+        mutationFn: async () => deleteLeagueMutation(leagueId),
+        onSuccess: async () => {
+            await qc.invalidateQueries({ queryKey: ["leagues"] });
+            router.push("/");
+        },
+    });
+
+    const requestDeleteSeason = (seasonName: string, seasonId: string) => {
+        const ok = window.confirm(
+            `Delete season "${seasonName}"?\n\nAll teams, matches, mappings and strength snapshots in this season will be permanently deleted.`,
+        );
+        if (!ok) return;
+        deleteSeasonM.mutate(seasonId);
+    };
+
+    const requestDeleteLeague = () => {
+        const leagueName = leagueQ.data?.name ?? "this league";
+        const ok = window.confirm(
+            `Delete league "${leagueName}"?\n\nAll seasons inside it (and their matches/teams) will be permanently deleted.`,
+        );
+        if (!ok) return;
+        deleteLeagueM.mutate();
+    };
+
     return (
         <div className="min-h-screen p-6 space-y-6">
-            <div className="flex items-center justify-between">
-                <div className="text-xl font-semibold">Seasons</div>
-                <Link href="/" className="text-sm underline">
-                    Back
-                </Link>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                    <div className="text-xl font-semibold">
+                        {leagueQ.data?.name ? `League · ${leagueQ.data.name}` : "Seasons"}
+                    </div>
+                    {leagueQ.data && (
+                        <div className="text-sm text-muted-foreground mt-0.5">
+                            {leagueQ.data.country ?? "—"} · {leagueQ.data.sportKey}
+                        </div>
+                    )}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                    <Button variant="outline" size="sm" asChild>
+                        <Link href="/">Back</Link>
+                    </Button>
+                    <Button
+                        variant="destructive"
+                        size="sm"
+                        onClick={requestDeleteLeague}
+                        disabled={deleteLeagueM.isPending || leagueQ.isLoading}
+                    >
+                        {deleteLeagueM.isPending ? "Deleting…" : "Delete league"}
+                    </Button>
+                </div>
             </div>
+
+            {deleteLeagueM.isError && (
+                <div className="text-sm text-red-600">
+                    {(deleteLeagueM.error as any)?.response?.errors?.[0]?.message ??
+                        (deleteLeagueM.error as any)?.message ??
+                        "Failed to delete league"}
+                </div>
+            )}
 
             <div className="rounded-2xl border p-4 space-y-3">
                 <div className="text-sm font-medium">Create season</div>
@@ -90,19 +156,35 @@ export default function LeaguePage() {
                         {(seasonsQ.error as any)?.response?.errors?.[0]?.message ?? "Failed"}
                     </div>
                 )}
+                {deleteSeasonM.isError && (
+                    <div className="text-sm text-red-600">
+                        {(deleteSeasonM.error as any)?.response?.errors?.[0]?.message ??
+                            (deleteSeasonM.error as any)?.message ??
+                            "Failed to delete season"}
+                    </div>
+                )}
 
                 <div className="space-y-2">
                     {seasonsQ.data?.map((s) => (
-                        <Link
+                        <div
                             key={s.id}
-                            href={`/season/${s.id}`}
-                            className="block rounded-xl border p-3 hover:bg-accent transition"
+                            className="rounded-xl border p-3 flex flex-wrap items-start justify-between gap-3"
                         >
-                            <div className="font-medium">{s.name}</div>
-                            <div className="text-sm text-muted-foreground">
-                                base={s.baseCoefHomeEqual} • flip={s.flipCoef}
-                            </div>
-                        </Link>
+                            <Link href={`/season/${s.id}`} className="min-w-0 hover:underline">
+                                <div className="font-medium">{s.name}</div>
+                                <div className="text-sm text-muted-foreground">
+                                    base={s.baseCoefHomeEqual} • flip={s.flipCoef}
+                                </div>
+                            </Link>
+                            <Button
+                                variant="destructive"
+                                size="sm"
+                                onClick={() => requestDeleteSeason(s.name, s.id)}
+                                disabled={deleteSeasonM.isPending}
+                            >
+                                Delete
+                            </Button>
+                        </div>
                     ))}
                 </div>
             </div>
