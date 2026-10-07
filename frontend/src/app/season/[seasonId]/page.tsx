@@ -404,6 +404,11 @@ export default function SeasonPage() {
     const [oddsAwayTeamId, setOddsAwayTeamId] = useState<string | undefined>(undefined);
     const [calculatedOdds, setCalculatedOdds] = useState<any | null>(null);
 
+    // Cross-table hover: highlight full row or column when hovering a team name
+    const [crossHover, setCrossHover] = useState<
+        { teamId: string; axis: "row" | "col" } | null
+    >(null);
+
     const calculateOddsQ = useQuery({
         queryKey: ["calculateOdds", snapshot?.id, oddsHomeTeamId, oddsAwayTeamId],
         queryFn: () => {
@@ -583,6 +588,67 @@ export default function SeasonPage() {
         return { backgroundColor: color };
     };
 
+    const oddsSelectedTeamIds = useMemo(() => {
+        const ids = new Set<string>();
+        if (oddsHomeTeamId) ids.add(oddsHomeTeamId);
+        if (oddsAwayTeamId) ids.add(oddsAwayTeamId);
+        return ids;
+    }, [oddsHomeTeamId, oddsAwayTeamId]);
+
+    const isOddsSelectedTeam = (teamId: string) => oddsSelectedTeamIds.has(teamId);
+
+    const oddsSelectionHighlightStyle: React.CSSProperties = {
+        backgroundColor: "rgba(251, 191, 36, 0.45)", // amber
+    };
+
+    const crossHoverHighlightStyle: React.CSSProperties = {
+        backgroundColor: "rgba(56, 189, 248, 0.35)", // sky
+    };
+
+    const getOddsSelectionRowStyle = (teamId: string): React.CSSProperties | undefined =>
+        isOddsSelectedTeam(teamId) ? oddsSelectionHighlightStyle : undefined;
+
+    const isCrossRowHovered = (teamId: string) =>
+        crossHover?.axis === "row" && crossHover.teamId === teamId;
+
+    const isCrossColHovered = (teamId: string) =>
+        crossHover?.axis === "col" && crossHover.teamId === teamId;
+
+    /** Selection > hover > strength-range colors. */
+    const getHeaderColorStyleWithSelection = (
+        teamId: string,
+        axis: "row" | "col",
+    ): React.CSSProperties => {
+        if (isOddsSelectedTeam(teamId)) return oddsSelectionHighlightStyle;
+        if (
+            (axis === "row" && isCrossRowHovered(teamId)) ||
+            (axis === "col" && isCrossColHovered(teamId))
+        ) {
+            return crossHoverHighlightStyle;
+        }
+        return getHeaderColorStyle(teamId);
+    };
+
+    const getCellColorStyleWithSelection = (
+        rowTeamId: string,
+        colTeamId: string,
+    ): React.CSSProperties => {
+        if (isOddsSelectedTeam(rowTeamId) || isOddsSelectedTeam(colTeamId)) {
+            return oddsSelectionHighlightStyle;
+        }
+        if (isCrossRowHovered(rowTeamId) || isCrossColHovered(colTeamId)) {
+            return crossHoverHighlightStyle;
+        }
+        return getCellColorStyle(rowTeamId, colTeamId);
+    };
+
+    const getCrossLineStyle = (
+        rowTeamId: string,
+    ): React.CSSProperties | undefined => {
+        if (isOddsSelectedTeam(rowTeamId)) return oddsSelectionHighlightStyle;
+        if (isCrossRowHovered(rowTeamId)) return crossHoverHighlightStyle;
+        return undefined;
+    };
 
     return (
         <div className="min-h-screen p-6 space-y-6">
@@ -1266,6 +1332,7 @@ export default function SeasonPage() {
                                     <div
                                         key={v.teamId}
                                         className="grid grid-cols-12 gap-2 px-3 py-2 text-sm border-t"
+                                        style={getOddsSelectionRowStyle(v.teamId)}
                                     >
                                         <div className="col-span-1 text-muted-foreground">{idx + 1}</div>
                                         <div className="col-span-7">{v.teamName}</div>
@@ -1391,20 +1458,26 @@ export default function SeasonPage() {
                         </div>
 
                         <div className="rounded-xl border overflow-hidden overflow-x-auto">
-                            <div className="min-w-full">
+                            <div className="min-w-full" onMouseLeave={() => setCrossHover(null)}>
                                 {/* Header row */}
                                 <div className="grid gap-2 px-3 py-2 text-sm bg-muted/50 sticky top-0 z-10"
                                     style={{ gridTemplateColumns: `140px repeat(${sortedTeams.length}, minmax(88px, 1fr))` }}>
                                     <div className="font-medium">Team / avg</div>
                                     {sortedTeams.map((team) => {
-                                        const headerStyle = getHeaderColorStyle(team.id);
+                                        const headerStyle = getHeaderColorStyleWithSelection(
+                                            team.id,
+                                            "col",
+                                        );
                                         const avg = teamAvgTotal.get(team.id);
                                         return (
                                             <div
                                                 key={team.id}
-                                                className="font-medium text-center text-xs"
+                                                className="font-medium text-center text-xs cursor-default"
                                                 title={avg != null ? `${team.name} · avg ${formatTotal(avg)}` : team.name}
                                                 style={headerStyle}
+                                                onMouseEnter={() =>
+                                                    setCrossHover({ teamId: team.id, axis: "col" })
+                                                }
                                             >
                                                 <div className="truncate">{team.name}</div>
                                                 <div className="text-[10px] font-normal text-muted-foreground">
@@ -1418,16 +1491,23 @@ export default function SeasonPage() {
                                 {/* Data rows */}
                                 {sortedTeams.map((rowTeam) => {
                                     const rowAvg = teamAvgTotal.get(rowTeam.id);
+                                    const lineStyle = getCrossLineStyle(rowTeam.id);
                                     return (
                                     <div
                                         key={rowTeam.id}
                                         className="grid gap-2 px-3 py-2 text-sm border-t"
-                                        style={{ gridTemplateColumns: `140px repeat(${sortedTeams.length}, minmax(88px, 1fr))` }}
+                                        style={{
+                                            gridTemplateColumns: `140px repeat(${sortedTeams.length}, minmax(88px, 1fr))`,
+                                            ...(lineStyle ?? {}),
+                                        }}
                                     >
                                         <div
-                                            className="font-medium"
+                                            className="font-medium cursor-default"
                                             title={rowAvg != null ? `${rowTeam.name} · avg ${formatTotal(rowAvg)}` : rowTeam.name}
-                                            style={getHeaderColorStyle(rowTeam.id)}
+                                            style={getHeaderColorStyleWithSelection(rowTeam.id, "row")}
+                                            onMouseEnter={() =>
+                                                setCrossHover({ teamId: rowTeam.id, axis: "row" })
+                                            }
                                         >
                                             <div className="truncate">{rowTeam.name}</div>
                                             <div className="text-[10px] font-normal text-muted-foreground">
@@ -1438,11 +1518,18 @@ export default function SeasonPage() {
                                             const totals = chessTableData.get(
                                                 pairTotalsKey(rowTeam.id, colTeam.id),
                                             );
-                                            const cellStyle = getCellColorStyle(rowTeam.id, colTeam.id);
+                                            const cellStyle = getCellColorStyleWithSelection(
+                                                rowTeam.id,
+                                                colTeam.id,
+                                            );
 
                                             if (rowTeam.id === colTeam.id) {
                                                 return (
-                                                    <div key={colTeam.id} className="text-center text-muted-foreground bg-muted/10">
+                                                    <div
+                                                        key={colTeam.id}
+                                                        className="text-center text-muted-foreground bg-muted/10"
+                                                        style={cellStyle}
+                                                    >
                                                         —
                                                     </div>
                                                 );
