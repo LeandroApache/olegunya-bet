@@ -17,6 +17,13 @@ input CalculateOddsFromStrengthInput {
   snapshotId: ID!
 }
 
+input CreateAndMapOddsPapiTeamsInput {
+  from: String!
+  seasonId: ID!
+  statusId: Int = 2
+  to: String!
+}
+
 input CreateLeagueInput {
   country: String
   name: String!
@@ -72,6 +79,39 @@ enum DerbyType {
   DERBY
 }
 
+enum ExternalDataProvider {
+  ODDSPAPI
+}
+
+type ExternalLeagueMappingGql {
+  createdAt: DateTime!
+  externalName: String
+  externalTournamentId: String!
+  id: ID!
+  leagueId: ID!
+  provider: ExternalDataProvider!
+  updatedAt: DateTime!
+}
+
+type ExternalTeamMappingGql {
+  createdAt: DateTime!
+  externalName: String
+  externalParticipantId: String!
+  id: ID!
+  provider: ExternalDataProvider!
+  seasonId: ID!
+  teamId: ID!
+  teamName: String!
+  updatedAt: DateTime!
+}
+
+input ImportOddsPapiFixturesInput {
+  from: String!
+  seasonId: ID!
+  statusId: Int = 2
+  to: String!
+}
+
 type LeagueGql {
   country: String
   createdAt: DateTime!
@@ -105,6 +145,7 @@ type MatchGql {
   computed: MatchComputedGql
   createdAt: DateTime!
   date: DateTime!
+  externalFixtureId: String
   homeTeamId: ID!
   homeTeamName: String!
   id: ID!
@@ -113,6 +154,7 @@ type MatchGql {
   kHome: Float!
   marketType: MarketType!
   seasonId: ID!
+  source: ExternalDataProvider
   total: Float
   tourId: ID
   updatedAt: DateTime!
@@ -133,23 +175,29 @@ type Me {
 
 type Mutation {
   bootstrapUser(input: BootstrapUserInput!): AuthTokens!
+  createAndMapOddsPapiTeams(input: CreateAndMapOddsPapiTeamsInput!): OddsPapiCreateAndMapTeamsResultGql!
   createLeague(input: CreateLeagueInput!): LeagueGql!
   createMatch(input: CreateMatchInput!): MatchGql!
   createSeason(input: CreateSeasonInput!): SeasonGql!
   createSeasonDerbyMatch(input: CreateSeasonDerbyMatchInput!): SeasonDerbyMatchGql!
   createStrengthSnapshot(input: CreateStrengthSnapshotInput!): StrengthSnapshotGql!
   createTeam(input: CreateTeamInput!): TeamGql!
+  deleteExternalLeagueMapping(id: ID!): Boolean!
+  deleteExternalTeamMapping(id: ID!): Boolean!
   deleteLeague(id: ID!): Boolean!
   deleteMatch(id: ID!): Boolean!
   deleteSeason(id: ID!): Boolean!
   deleteSeasonDerbyMatch(id: ID!): Boolean!
   deleteTeam(id: ID!): Boolean!
+  importOddsPapiFixtures(input: ImportOddsPapiFixturesInput!): OddsPapiImportResultGql!
   login(input: LoginInput!): AuthTokens!
   updateLeague(input: UpdateLeagueInput!): LeagueGql!
   updateMatch(input: UpdateMatchInput!): MatchGql!
   updateSeason(input: UpdateSeasonInput!): SeasonGql!
   updateSeasonDerbyMatch(input: UpdateSeasonDerbyMatchInput!): SeasonDerbyMatchGql!
   updateTeam(input: UpdateTeamInput!): TeamGql!
+  upsertExternalLeagueMapping(input: UpsertExternalLeagueMappingInput!): ExternalLeagueMappingGql!
+  upsertExternalTeamMapping(input: UpsertExternalTeamMappingInput!): ExternalTeamMappingGql!
 }
 
 type OddsFromStrengthGql {
@@ -160,8 +208,64 @@ type OddsFromStrengthGql {
   teamName: String!
 }
 
+type OddsPapiCreateAndMapTeamsResultGql {
+  alreadyMapped: Int!
+  failed: Int!
+  mappingsCreated: Int!
+  participantsFound: Int!
+  teamsCreated: Int!
+}
+
+type OddsPapiFixturePreviewGql {
+  awayMapped: Boolean!
+  awayTeamId: ID
+  fixtureId: String!
+  hasOdds: Boolean!
+  homeMapped: Boolean!
+  homeTeamId: ID
+  participant1Id: Int!
+  participant1Name: String!
+  participant2Id: Int!
+  participant2Name: String!
+  startTime: String!
+  statusId: Int!
+}
+
+type OddsPapiImportResultGql {
+  alreadyImported: Int!
+  created: Int!
+  failed: Int!
+  fixturesFound: Int!
+  imported: Int!
+  importedWithoutTotal: Int!
+  matches: [MatchGql!]!
+  missingOdds: Int!
+  scanned: Int!
+  skipped: Int!
+  skips: [OddsPapiImportSkipGql!]!
+  unmapped: Int!
+  updated: Int!
+}
+
+type OddsPapiImportSkipGql {
+  fixtureId: String!
+  participant1Name: String
+  participant2Name: String
+  reason: String!
+}
+
+type OddsPapiTournamentGql {
+  categoryName: String!
+  categorySlug: String!
+  tournamentId: Int!
+  tournamentName: String!
+  tournamentSlug: String!
+}
+
 type Query {
   calculateOddsFromStrength(input: CalculateOddsFromStrengthInput!): OddsFromStrengthGql!
+  externalLeagueMappings(leagueId: ID!): [ExternalLeagueMappingGql!]!
+  externalTeamMappings(seasonId: ID!): [ExternalTeamMappingGql!]!
   findTeam(query: String!, seasonId: ID!): TeamGql
   league(id: ID!): LeagueGql!
   leagues(sportKey: SportKey): [LeagueGql!]!
@@ -169,6 +273,8 @@ type Query {
   matches(seasonId: ID!): [MatchGql!]!
   matchesPaginated(page: Int = 1, pageSize: Int = 20, seasonId: ID!): MatchesPageGql!
   me: Me!
+  oddsPapiTournaments(sportKey: SportKey!): [OddsPapiTournamentGql!]!
+  previewOddsPapiFixtures(input: ImportOddsPapiFixturesInput!): [OddsPapiFixturePreviewGql!]!
   season(id: ID!): SeasonGql!
   seasonDerbyMatches(seasonId: ID!): [SeasonDerbyMatchGql!]!
   seasons(leagueId: ID!): [SeasonGql!]!
@@ -245,15 +351,11 @@ input UpdateLeagueInput {
 }
 
 input UpdateMatchInput {
-  awayTeamId: ID
-  date: String
-  homeTeamId: ID
   id: ID!
-  kAway: Float
-  kDraw: Float
-  kHome: Float
+  kAway: Float!
+  kDraw: Float!
+  kHome: Float!
   total: Float
-  tourId: ID
 }
 
 input UpdateSeasonDerbyMatchInput {
@@ -272,4 +374,17 @@ input UpdateTeamInput {
   aliases: [String!]
   id: ID!
   name: String
+}
+
+input UpsertExternalLeagueMappingInput {
+  externalName: String
+  externalTournamentId: String!
+  leagueId: ID!
+}
+
+input UpsertExternalTeamMappingInput {
+  externalName: String
+  externalParticipantId: String!
+  seasonId: ID!
+  teamId: ID!
 }
