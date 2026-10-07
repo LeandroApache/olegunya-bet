@@ -597,16 +597,31 @@ export default function SeasonPage() {
 
     const isOddsSelectedTeam = (teamId: string) => oddsSelectedTeamIds.has(teamId);
 
-    const oddsSelectionHighlightStyle: React.CSSProperties = {
-        backgroundColor: "rgba(251, 191, 36, 0.45)", // amber
+    const bumpRgbaAlpha = (color: string, alpha: number): string => {
+        const m = color.match(
+            /rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)(?:\s*,\s*([\d.]+))?\s*\)/,
+        );
+        if (!m) return color;
+        return `rgba(${m[1]}, ${m[2]}, ${m[3]}, ${alpha})`;
     };
 
-    const crossHoverHighlightStyle: React.CSSProperties = {
-        backgroundColor: "rgba(56, 189, 248, 0.35)", // sky
+    /** Same hue as the team's strength range; stronger fill + ring so the line stands out. */
+    const getTeamAccentStyle = (
+        teamId: string,
+        mode: "select" | "hover",
+    ): React.CSSProperties => {
+        const base = getRangeColor(teamId) ?? "rgba(148, 163, 184, 0.5)";
+        const fillAlpha = mode === "select" ? 0.85 : 0.65;
+        const ringAlpha = mode === "select" ? 1 : 0.85;
+        const ringWidth = mode === "select" ? 2 : 1;
+        return {
+            backgroundColor: bumpRgbaAlpha(base, fillAlpha),
+            boxShadow: `inset 0 0 0 ${ringWidth}px ${bumpRgbaAlpha(base, ringAlpha)}`,
+        };
     };
 
     const getOddsSelectionRowStyle = (teamId: string): React.CSSProperties | undefined =>
-        isOddsSelectedTeam(teamId) ? oddsSelectionHighlightStyle : undefined;
+        isOddsSelectedTeam(teamId) ? getTeamAccentStyle(teamId, "select") : undefined;
 
     const isCrossRowHovered = (teamId: string) =>
         crossHover?.axis === "row" && crossHover.teamId === teamId;
@@ -614,17 +629,17 @@ export default function SeasonPage() {
     const isCrossColHovered = (teamId: string) =>
         crossHover?.axis === "col" && crossHover.teamId === teamId;
 
-    /** Selection > hover > strength-range colors. */
+    /** Selection > hover > strength-range colors (all in the team's range hue). */
     const getHeaderColorStyleWithSelection = (
         teamId: string,
         axis: "row" | "col",
     ): React.CSSProperties => {
-        if (isOddsSelectedTeam(teamId)) return oddsSelectionHighlightStyle;
+        if (isOddsSelectedTeam(teamId)) return getTeamAccentStyle(teamId, "select");
         if (
             (axis === "row" && isCrossRowHovered(teamId)) ||
             (axis === "col" && isCrossColHovered(teamId))
         ) {
-            return crossHoverHighlightStyle;
+            return getTeamAccentStyle(teamId, "hover");
         }
         return getHeaderColorStyle(teamId);
     };
@@ -633,20 +648,18 @@ export default function SeasonPage() {
         rowTeamId: string,
         colTeamId: string,
     ): React.CSSProperties => {
-        if (isOddsSelectedTeam(rowTeamId) || isOddsSelectedTeam(colTeamId)) {
-            return oddsSelectionHighlightStyle;
-        }
-        if (isCrossRowHovered(rowTeamId) || isCrossColHovered(colTeamId)) {
-            return crossHoverHighlightStyle;
-        }
+        if (isOddsSelectedTeam(rowTeamId)) return getTeamAccentStyle(rowTeamId, "select");
+        if (isOddsSelectedTeam(colTeamId)) return getTeamAccentStyle(colTeamId, "select");
+        if (isCrossRowHovered(rowTeamId)) return getTeamAccentStyle(rowTeamId, "hover");
+        if (isCrossColHovered(colTeamId)) return getTeamAccentStyle(colTeamId, "hover");
         return getCellColorStyle(rowTeamId, colTeamId);
     };
 
     const getCrossLineStyle = (
         rowTeamId: string,
     ): React.CSSProperties | undefined => {
-        if (isOddsSelectedTeam(rowTeamId)) return oddsSelectionHighlightStyle;
-        if (isCrossRowHovered(rowTeamId)) return crossHoverHighlightStyle;
+        if (isOddsSelectedTeam(rowTeamId)) return getTeamAccentStyle(rowTeamId, "select");
+        if (isCrossRowHovered(rowTeamId)) return getTeamAccentStyle(rowTeamId, "hover");
         return undefined;
     };
 
