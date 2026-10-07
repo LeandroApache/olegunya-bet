@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { ExternalDataProvider, SportKey } from '../../generated/prisma';
@@ -13,7 +14,10 @@ import {
   extractPinnacleClosingOneXTwo,
 } from './odds-papi-closing';
 import { listMatchTotalsMarkets } from './odds-papi-market-filter';
-import { OddsPapiClient } from './odds-papi.client';
+import {
+  OddsPapiClient,
+  OddsPapiHistoricalOddsNotFoundError,
+} from './odds-papi.client';
 import {
   getOddsPapiSportConfig,
   ODDSPAPI_BOOKMAKER_PINNACLE,
@@ -23,7 +27,9 @@ import { selectMainTotalLine } from './odds-papi-total-selector';
 import {
   ExternalLeagueMappingGql,
   ExternalTeamMappingGql,
+  CreateAndMapOddsPapiTeamsInput,
   ImportOddsPapiFixturesInput,
+  OddsPapiCreateAndMapTeamsResultGql,
   OddsPapiFixturePreviewGql,
   OddsPapiImportResultGql,
   OddsPapiImportSkipGql,
@@ -31,16 +37,18 @@ import {
   UpsertExternalLeagueMappingInput,
   UpsertExternalTeamMappingInput,
 } from './dto/odds-papi.dto';
+import { uniqueParticipantsFromFixtures } from './odds-papi-participants';
 
 @Injectable()
 export class OddsPapiService {
+  private readonly logger = new Logger(OddsPapiService.name);
+  private provider = ExternalDataProvider.ODDSPAPI;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly client: OddsPapiClient,
     private readonly matches: MatchService,
   ) {}
-
-  private provider = ExternalDataProvider.ODDSPAPI;
 
   // ─── League mapping ───────────────────────────────────────────────
 
@@ -222,6 +230,93 @@ export class OddsPapiService {
     });
   }
 
+  /**
+   * Create internal Teams + ExternalTeamMapping from OddsPapi participants
+   * discovered in the finished-fixture window (same discovery as preview).
+   * Safe for empty seasons and interrupted OddsPapi onboarding; blocked when
+   * the season already has internal teams that are not OddsPapi-mapped.
+   */
+  async createAndMapTeams(
+    input: CreateAndMapOddsPapiTeamsInput,
+  ): Promise<OddsPapiCreateAndMapTeamsResultGql> {
+    const ctx = await this.loadImportContext(input.seasonId);
+
+    const existingTeams = await this.prisma.team.findMany({
+      where: { seasonId: input.seasonId },
+      select: { id: true },
+    });
+    const mappedTeamIds = new Set(
+      [...ctx.teamByParticipant.values()].map((m) => m.teamId),
+    );
+    const hasUnmappedInternalTeams = existingTeams.some(
+      (t) => !mappedTeamIds.has(t.id),
+    );
+    if (existingTeams.length > 0 && hasUnmappedInternalTeams) {
+      throw new BadRequestException(
+        'Season already has internal teams without OddsPapi mappings. Use manual team mapping instead of bulk create.',
+      );
+    }
+
+    const fixtures = await this.fetchFinishedFixtures(
+      ctx.externalTournamentId,
+      input.from,
+      input.to,
+      input.statusId,
+    );
+    const participants = uniqueParticipantsFromFixtures(fixtures);
+
+    let teamsCreated = 0;
+    let mappingsCreated = 0;
+    let alreadyMapped = 0;
+
+    await this.prisma.$transaction(async (tx) => {
+      for (const p of participants) {
+        if (ctx.teamByParticipant.has(p.externalParticipantId)) {
+          alreadyMapped += 1;
+          continue;
+        }
+
+        const name = this.cleanTeamName(p.externalName);
+        if (!name) {
+          throw new BadRequestException(
+            `OddsPapi participant ${p.externalParticipantId} has an empty name`,
+          );
+        }
+
+        const team = await tx.team.create({
+          data: {
+            seasonId: input.seasonId,
+            name,
+            aliases: [],
+          },
+        });
+        teamsCreated += 1;
+
+        await tx.externalTeamMapping.create({
+          data: {
+            provider: this.provider,
+            seasonId: input.seasonId,
+            teamId: team.id,
+            externalParticipantId: p.externalParticipantId,
+            externalName: p.externalName || null,
+          },
+        });
+        mappingsCreated += 1;
+
+        // Keep in-memory set so duplicate participant rows in the same batch stay unique.
+        ctx.teamByParticipant.set(p.externalParticipantId, { teamId: team.id });
+      }
+    });
+
+    return {
+      participantsFound: participants.length,
+      teamsCreated,
+      mappingsCreated,
+      alreadyMapped,
+      failed: 0,
+    };
+  }
+
   async importFixtures(
     input: ImportOddsPapiFixturesInput,
   ): Promise<OddsPapiImportResultGql> {
@@ -281,6 +376,11 @@ export class OddsPapiService {
       result.skipped += 1;
     };
 
+    this.logger.log(
+      `OddsPapi import season=${input.seasonId}: ${fixtures.length} finished fixture(s)`,
+    );
+
+    let oddsFetchIndex = 0;
     for (const f of fixtures) {
       const names = { p1: f.participant1Name, p2: f.participant2Name };
 
@@ -305,6 +405,11 @@ export class OddsPapiService {
         continue;
       }
 
+      oddsFetchIndex += 1;
+      this.logger.log(
+        `OddsPapi import historical-odds ${oddsFetchIndex}: ${f.participant1Name} vs ${f.participant2Name} (${f.fixtureId})`,
+      );
+
       let hist;
       try {
         hist = await this.client.getHistoricalOdds(
@@ -312,6 +417,12 @@ export class OddsPapiService {
           ODDSPAPI_BOOKMAKER_PINNACLE,
         );
       } catch (e: any) {
+        // Expected: OddsPapi has no historical board for this fixture.
+        if (e instanceof OddsPapiHistoricalOddsNotFoundError) {
+          result.missingOdds += 1;
+          pushSkip(f.fixtureId, 'MISSING_PINNACLE_1X2', names);
+          continue;
+        }
         result.failed += 1;
         pushSkip(f.fixtureId, `HISTORICAL_ODDS_ERROR:${e?.message ?? 'unknown'}`, names);
         continue;
@@ -358,10 +469,18 @@ export class OddsPapiService {
       }
     }
 
+    this.logger.log(
+      `OddsPapi import done season=${input.seasonId}: found=${result.fixturesFound} imported=${result.imported} already=${result.alreadyImported} missingOdds=${result.missingOdds} unmapped=${result.unmapped} failed=${result.failed}`,
+    );
+
     return result;
   }
 
   // ─── helpers ──────────────────────────────────────────────────────
+
+  private cleanTeamName(s: string): string {
+    return s.trim().replace(/\s+/g, ' ');
+  }
 
   private async loadImportContext(seasonId: string) {
     const season = await this.prisma.season.findUnique({
@@ -416,8 +535,6 @@ export class OddsPapiService {
       from,
       to,
       statusId: statusId ?? ODDSPAPI_STATUS_FINISHED,
-      hasOdds: true,
-      bookmakers: ODDSPAPI_BOOKMAKER_PINNACLE,
     });
   }
 

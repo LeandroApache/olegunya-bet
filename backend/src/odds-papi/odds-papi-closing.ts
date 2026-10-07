@@ -18,12 +18,12 @@ export function closingCutoffIso(trueStartTime?: string | null, startTime?: stri
 
 /**
  * Latest snapshot with active===true and createdAt <= closingCutoff.
- * Home/Draw/Away may use different timestamps — that is intentional.
+ * Home/Draw/Away (and Over/Under) may use different timestamps — that is intentional.
  */
-export function closingPrice(
+export function closingSnapshot(
   snapshots: OddsPapiOddsSnapshot[],
   closingCutoff: Date,
-): number | null {
+): OddsPapiOddsSnapshot | null {
   const valid = snapshots
     .filter((s) => {
       if (s.active !== true) return false;
@@ -33,7 +33,14 @@ export function closingPrice(
     })
     .sort((a, b) => parseUtc(b.createdAt).getTime() - parseUtc(a.createdAt).getTime());
 
-  return valid.length ? valid[0].price : null;
+  return valid.length ? valid[0] : null;
+}
+
+export function closingPrice(
+  snapshots: OddsPapiOddsSnapshot[],
+  closingCutoff: Date,
+): number | null {
+  return closingSnapshot(snapshots, closingCutoff)?.price ?? null;
 }
 
 function snapshotsForOutcome(

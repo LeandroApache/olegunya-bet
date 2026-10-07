@@ -64,7 +64,8 @@ If no valid total: import match anyway with `total = null`.
 ## Pipeline
 
 ```text
-fixtures (tournament + date range)
+fixtures (tournament + date range, statusId=2; no hasOdds filter —
+  finished fixtures typically report hasOdds=false even when historical odds exist)
   → skip if Match already has (ODDSPAPI, externalFixtureId)  [no historical-odds call]
   → require ExternalTeamMapping (no name guessing)
   → historical-odds (Pinnacle)
@@ -73,7 +74,19 @@ fixtures (tournament + date range)
   → MatchService.upsertImportedMatch → dirty/derby calc → MatchComputed
 ```
 
+`/fixtures` HTTP 404 with `FIXTURE_NOT_FOUND` is treated as an empty list (valid empty date range).
+
 Strength remains manual via `createStrengthSnapshot`.
+
+## Team onboarding
+
+For a **new empty season** (or interrupted OddsPapi onboarding where every existing team already has an OddsPapi mapping), after Preview:
+
+```text
+createAndMapOddsPapiTeams(seasonId, from, to)
+```
+
+Server re-fetches fixtures once for the date window, derives unique participants by `externalParticipantId`, then creates `Team` + `ExternalTeamMapping` in one transaction. Idempotent. Blocked when the season has internal teams without OddsPapi mappings (use manual mapping).
 
 ## GraphQL
 
@@ -83,6 +96,7 @@ Strength remains manual via `createStrengthSnapshot`.
 | `upsertExternalLeagueMapping` / `delete…` / `externalLeagueMappings` | league ↔ tournament |
 | `upsertExternalTeamMapping` / `delete…` / `externalTeamMappings` | team ↔ participant |
 | `previewOddsPapiFixtures` | dry-run mapping flags |
+| `createAndMapOddsPapiTeams` | bulk Team + mapping for empty / OddsPapi-only seasons |
 | `importOddsPapiFixtures` | import |
 
 Result counts: `fixturesFound`, `imported`, `alreadyImported`, `unmapped`, `missingOdds`, `failed`, `importedWithoutTotal`, plus `skips[]` (`MISSING_PINNACLE_1X2`, `UNMAPPED_*`, …).
@@ -92,6 +106,7 @@ Result counts: `fixturesFound`, `imported`, `alreadyImported`, `unmapped`, `miss
 - `/markets` cached in-memory (hours)
 - Already-imported fixtures skip `/historical-odds`
 - Historical-odds calls are rate-limited (~5.1s cooldown)
+- Team onboarding uses one `/fixtures` call (same window as preview)
 
 ## Migration
 

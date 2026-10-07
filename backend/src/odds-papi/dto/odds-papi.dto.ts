@@ -12,7 +12,7 @@ export class UpsertExternalLeagueMappingInput {
   @IsString()
   externalTournamentId: string;
 
-  @Field({ nullable: true })
+  @Field(() => String, { nullable: true })
   @IsOptional()
   externalName?: string;
 }
@@ -29,7 +29,7 @@ export class UpsertExternalTeamMappingInput {
   @IsString()
   externalParticipantId: string;
 
-  @Field({ nullable: true })
+  @Field(() => String, { nullable: true })
   @IsOptional()
   externalName?: string;
 }
@@ -53,6 +53,44 @@ export class ImportOddsPapiFixturesInput {
   statusId?: number;
 }
 
+/** Same date-window shape as preview/import; participants are derived server-side. */
+@InputType()
+export class CreateAndMapOddsPapiTeamsInput {
+  @Field(() => ID)
+  seasonId: string;
+
+  @Field()
+  @IsDateString()
+  from: string;
+
+  @Field()
+  @IsDateString()
+  to: string;
+
+  @Field(() => Int, { nullable: true, defaultValue: 2 })
+  @IsOptional()
+  @Min(0)
+  statusId?: number;
+}
+
+@ObjectType()
+export class OddsPapiCreateAndMapTeamsResultGql {
+  @Field(() => Int)
+  participantsFound: number;
+
+  @Field(() => Int)
+  teamsCreated: number;
+
+  @Field(() => Int)
+  mappingsCreated: number;
+
+  @Field(() => Int)
+  alreadyMapped: number;
+
+  @Field(() => Int)
+  failed: number;
+}
+
 @ObjectType()
 export class ExternalLeagueMappingGql {
   @Field(() => ID)
@@ -64,7 +102,7 @@ export class ExternalLeagueMappingGql {
   @Field()
   externalTournamentId: string;
 
-  @Field({ nullable: true })
+  @Field(() => String, { nullable: true })
   externalName?: string | null;
 
   @Field(() => ID)
@@ -88,7 +126,7 @@ export class ExternalTeamMappingGql {
   @Field()
   externalParticipantId: string;
 
-  @Field({ nullable: true })
+  @Field(() => String, { nullable: true })
   externalName?: string | null;
 
   @Field(() => ID)
@@ -172,10 +210,10 @@ export class OddsPapiImportSkipGql {
   @Field()
   reason: string;
 
-  @Field({ nullable: true })
+  @Field(() => String, { nullable: true })
   participant1Name?: string | null;
 
-  @Field({ nullable: true })
+  @Field(() => String, { nullable: true })
   participant2Name?: string | null;
 }
 

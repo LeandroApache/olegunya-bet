@@ -1,3 +1,4 @@
+import { explainMainTotalSelection } from './odds-papi-total-diagnostics';
 import {
   buildTotalLineCandidate,
   distanceFromEvenMoney,
@@ -147,5 +148,81 @@ describe('distanceFromEvenMoney / total selection', () => {
       cutoff,
     );
     expect(selected).toBeNull();
+  });
+
+  it('does not pair Over from one line with Under from another', () => {
+    // Line 5.0 has Over only; line 5.5 has Under only — neither candidate is valid.
+    const data = hist({
+      '1524': {
+        outcomes: {
+          '1524': snaps([{ createdAt: '2026-09-30T15:40:00.000Z', price: 1.91 }]),
+        },
+      },
+      '1526': {
+        outcomes: {
+          '1527': snaps([{ createdAt: '2026-09-30T15:40:00.000Z', price: 1.91 }]),
+        },
+      },
+    });
+    expect(
+      buildTotalLineCandidate(market(5.0, 1524, 1524, 1525), data, cutoff),
+    ).toBeNull();
+    expect(
+      buildTotalLineCandidate(market(5.5, 1526, 1526, 1527), data, cutoff),
+    ).toBeNull();
+    expect(
+      selectMainTotalLine(
+        [market(5.0, 1524, 1524, 1525), market(5.5, 1526, 1526, 1527)],
+        data,
+        cutoff,
+      ),
+    ).toBeNull();
+  });
+
+  it('explainMainTotalSelection marks closest eligible line as YES', () => {
+    const data = hist({
+      '1524': {
+        outcomes: {
+          '1524': snaps([{ createdAt: '2026-09-30T15:40:00.000Z', price: 1.877 }]),
+          '1525': snaps([{ createdAt: '2026-09-30T15:41:00.000Z', price: 1.793 }]),
+        },
+      },
+      '1526': {
+        outcomes: {
+          '1526': snaps([{ createdAt: '2026-09-30T15:40:00.000Z', price: 2.06 }]),
+          '1527': snaps([{ createdAt: '2026-09-30T15:40:00.000Z', price: 1.714 }]),
+        },
+      },
+      '1522': {
+        outcomes: {
+          '1522': snaps([{ createdAt: '2026-09-30T15:40:00.000Z', price: 1.55 }]),
+          // under missing → ineligible
+        },
+      },
+    });
+
+    const diag = explainMainTotalSelection(
+      [
+        market(4.5, 1522, 1522, 1523),
+        market(5.0, 1524, 1524, 1525),
+        market(5.5, 1526, 1526, 1527),
+      ],
+      data,
+      cutoff,
+    );
+
+    expect(diag.selected?.line).toBe(5.0);
+    const yes = diag.rows.filter((r) => r.selected);
+    expect(yes).toHaveLength(1);
+    expect(yes[0].line).toBe(5.0);
+    expect(yes[0].overCreatedAt).toBe('2026-09-30T15:40:00.000Z');
+    expect(yes[0].underCreatedAt).toBe('2026-09-30T15:41:00.000Z');
+
+    const missingUnder = diag.rows.find((r) => r.line === 4.5);
+    expect(missingUnder?.eligible).toBe(false);
+    expect(missingUnder?.skipReason).toBe('MISSING_UNDER');
+
+    expect(diag.table).toContain('YES');
+    expect(diag.table).toContain('skip:MISSING_UNDER');
   });
 });

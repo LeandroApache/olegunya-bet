@@ -4,7 +4,9 @@ import { OddsPapiService } from './odds-papi.service';
 import {
   ExternalLeagueMappingGql,
   ExternalTeamMappingGql,
+  CreateAndMapOddsPapiTeamsInput,
   ImportOddsPapiFixturesInput,
+  OddsPapiCreateAndMapTeamsResultGql,
   OddsPapiFixturePreviewGql,
   OddsPapiImportResultGql,
   OddsPapiTournamentGql,
@@ -56,6 +58,11 @@ export class OddsPapiResolver {
   @Mutation(() => Boolean)
   deleteExternalTeamMapping(@Args('id', { type: () => ID }) id: string) {
     return this.service.deleteTeamMapping(id);
+  }
+
+  @Mutation(() => OddsPapiCreateAndMapTeamsResultGql)
+  createAndMapOddsPapiTeams(@Args('input') input: CreateAndMapOddsPapiTeamsInput) {
+    return this.service.createAndMapTeams(input);
   }
 
   @Mutation(() => OddsPapiImportResultGql)
