@@ -431,6 +431,21 @@ export default function SeasonPage() {
 
     const [snapshot, setSnapshot] = useState<StrengthSnapshot | null>(null);
 
+    /** Same order as the Strength table (strongest → weakest) for the totals cross-table. */
+    const strengthOrderedTeams = useMemo(() => {
+        if (!snapshot?.values?.length) return sortedTeams;
+        const byId = new Map(sortedTeams.map((t) => [t.id, t]));
+        const ordered: typeof sortedTeams = [];
+        for (const v of [...snapshot.values].sort((a, b) => b.strength - a.strength)) {
+            const team = byId.get(v.teamId);
+            if (team) ordered.push(team);
+        }
+        for (const team of sortedTeams) {
+            if (!ordered.some((t) => t.id === team.id)) ordered.push(team);
+        }
+        return ordered;
+    }, [snapshot, sortedTeams]);
+
     // Odds calculation from strength
     const [oddsHomeTeamId, setOddsHomeTeamId] = useState<string | undefined>(undefined);
     const [oddsAwayTeamId, setOddsAwayTeamId] = useState<string | undefined>(undefined);
@@ -1449,7 +1464,7 @@ export default function SeasonPage() {
                 )}
 
                 {/* Chess Table with Match Totals */}
-                {snapshot && sortedTeams.length > 0 && (
+                {snapshot && strengthOrderedTeams.length > 0 && (
                     <div className="space-y-3 pt-4 border-t">
                         <div className="text-sm font-medium">Match Totals Cross-Table</div>
 
@@ -1494,9 +1509,9 @@ export default function SeasonPage() {
                             <div className="min-w-full" onMouseLeave={() => setCrossHover(null)}>
                                 {/* Header row */}
                                 <div className="grid gap-2 px-3 py-2 text-sm bg-muted/50 sticky top-0 z-10"
-                                    style={{ gridTemplateColumns: `140px repeat(${sortedTeams.length}, minmax(88px, 1fr))` }}>
+                                    style={{ gridTemplateColumns: `140px repeat(${strengthOrderedTeams.length}, minmax(88px, 1fr))` }}>
                                     <div className="font-medium">Team / avg</div>
-                                    {sortedTeams.map((team) => {
+                                    {strengthOrderedTeams.map((team) => {
                                         const headerStyle = getHeaderColorStyleWithSelection(
                                             team.id,
                                             "col",
@@ -1522,7 +1537,7 @@ export default function SeasonPage() {
                                 </div>
 
                                 {/* Data rows */}
-                                {sortedTeams.map((rowTeam) => {
+                                {strengthOrderedTeams.map((rowTeam) => {
                                     const rowAvg = teamAvgTotal.get(rowTeam.id);
                                     const lineStyle = getCrossLineStyle(rowTeam.id);
                                     return (
@@ -1530,7 +1545,7 @@ export default function SeasonPage() {
                                         key={rowTeam.id}
                                         className="grid gap-2 px-3 py-2 text-sm border-t"
                                         style={{
-                                            gridTemplateColumns: `140px repeat(${sortedTeams.length}, minmax(88px, 1fr))`,
+                                            gridTemplateColumns: `140px repeat(${strengthOrderedTeams.length}, minmax(88px, 1fr))`,
                                             ...(lineStyle ?? {}),
                                         }}
                                     >
@@ -1547,7 +1562,7 @@ export default function SeasonPage() {
                                                 {rowAvg != null ? `μ ${formatTotal(rowAvg)}` : "μ —"}
                                             </div>
                                         </div>
-                                        {sortedTeams.map((colTeam) => {
+                                        {strengthOrderedTeams.map((colTeam) => {
                                             const totals = chessTableData.get(
                                                 pairTotalsKey(rowTeam.id, colTeam.id),
                                             );
