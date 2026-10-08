@@ -58,6 +58,34 @@ function localDateToIso(dateStr: string) {
     return new Date(`${dateStr}T00:00:00.000Z`).toISOString();
 }
 
+const STRENGTH_RANGE_BAND = 5;
+
+/** Base palette for 5% strength bands (strongest → weaker). */
+const BASE_RANGE_COLORS = [
+    "rgba(37, 99, 235, 0.6)", // синий — 0–5%
+    "rgba(220, 38, 38, 0.6)", // красный — 5–10%
+    "rgba(147, 51, 234, 0.6)", // фиолетовый — 10–15%
+    "rgba(234, 88, 12, 0.6)", // оранжевый — 15–20%
+    "rgba(234, 179, 8, 0.6)", // желтый — 20–25%
+    "rgba(6, 182, 212, 0.6)", // циан — 25–30%
+    "rgba(132, 204, 22, 0.6)", // лайм — 30–35%
+    "rgba(236, 72, 153, 0.6)", // розовый — 35–40%
+    "rgba(99, 102, 241, 0.6)", // индиго — 40–45%
+    "rgba(190, 24, 93, 0.6)", // малиновый — 45–50%
+    "rgba(14, 165, 233, 0.6)", // sky — 50–55%
+    "rgba(180, 83, 9, 0.6)", // коричнево-оранжевый — 55–60%
+    "rgba(22, 163, 74, 0.6)", // зелёный — 60–65%
+    "rgba(124, 58, 237, 0.6)", // фиолетовый-2 — 65–70%
+    "rgba(244, 63, 94, 0.6)", // rose — 70–75%
+    "rgba(8, 145, 178, 0.6)", // teal — 75–80%
+];
+
+function colorForRangeIndex(index: number): string {
+    if (index < BASE_RANGE_COLORS.length) return BASE_RANGE_COLORS[index];
+    const hue = (index * 47) % 360;
+    return `hsla(${hue}, 72%, 45%, 0.6)`;
+}
+
 export default function SeasonPage() {
     const params = useParams<{ seasonId: string }>();
     const seasonId = params.seasonId;
@@ -512,55 +540,44 @@ export default function SeasonPage() {
         return map;
     }, [snapshot]);
 
-    // Color palette for different strength ranges (from strongest to weakest)
-    // Diverse, highly contrasting colors for better visual distinction
-    const rangeColors = [
-        'rgba(37, 99, 235, 0.6)',    // синий - strongest (0-5%)
-        'rgba(220, 38, 38, 0.6)',    // красный - (5-10%)
-        'rgba(147, 51, 234, 0.6)',   // фиолетовый - (10-15%)
-        'rgba(234, 88, 12, 0.6)',    // оранжевый - (15-20%)
-        'rgba(234, 179, 8, 0.6)',    // желтый - (20-25%)
-        'rgba(6, 182, 212, 0.6)',    // циан/бирюзовый - (25-30%)
-        'rgba(132, 204, 22, 0.6)',   // лайм/желто-зеленый - (30-35%)
-        'rgba(236, 72, 153, 0.6)',   // розовый/фуксия - (35-40%)
-    ];
+    // Assign every team a 5% band relative to max strength (covers large gaps like −36)
+    const { teamStrengthRanges, rangeColors, strengthRangeMax } = useMemo(() => {
+        const empty = {
+            teamStrengthRanges: new Map<string, number>(),
+            rangeColors: [] as string[],
+            strengthRangeMax: 0,
+        };
+        if (!snapshot || sortedTeams.length === 0 || strengthMap.size === 0) return empty;
 
-    // Calculate max strength and assign teams to 5% ranges
-    const teamStrengthRanges = useMemo(() => {
-        if (!snapshot || sortedTeams.length === 0) return new Map<string, number>();
+        const strengths = Array.from(strengthMap.values());
+        const maxStrength = Math.max(...strengths);
+        const minStrength = Math.min(...strengths);
+        const maxDiff = Math.max(0, maxStrength - minStrength);
+        const bandCount = Math.max(1, Math.ceil(maxDiff / STRENGTH_RANGE_BAND) || 1);
 
+        const colors = Array.from({ length: bandCount }, (_, i) => colorForRangeIndex(i));
         const ranges = new Map<string, number>();
 
-        // Find maximum strength
-        let maxStrength = 0;
-        strengthMap.forEach((strength) => {
-            if (strength > maxStrength) {
-                maxStrength = strength;
-            }
-        });
-
-        if (maxStrength === 0) return ranges;
-
-        // Assign each team to a range based on how far it is from max strength
         strengthMap.forEach((strength, teamId) => {
-            // Calculate how many 5% ranges below max strength
-            const diffFromMax = maxStrength - strength;
-            const rangeIndex = Math.floor(diffFromMax / 5);
-
-            // Only assign range if within reasonable bounds (first 8 ranges)
-            if (rangeIndex < rangeColors.length) {
-                ranges.set(teamId, rangeIndex);
-            }
+            const rangeIndex = Math.min(
+                colors.length - 1,
+                Math.max(0, Math.floor((maxStrength - strength) / STRENGTH_RANGE_BAND)),
+            );
+            ranges.set(teamId, rangeIndex);
         });
 
-        return ranges;
+        return {
+            teamStrengthRanges: ranges,
+            rangeColors: colors,
+            strengthRangeMax: maxStrength,
+        };
     }, [snapshot, sortedTeams, strengthMap]);
 
     // Function to get color for a team strength range
     const getRangeColor = (teamId: string): string | null => {
         const rangeIndex = teamStrengthRanges.get(teamId);
         if (rangeIndex === undefined) return null;
-        return rangeColors[rangeIndex];
+        return rangeColors[rangeIndex] ?? null;
     };
 
     // Function to calculate cell background color based on strength range
@@ -572,11 +589,12 @@ export default function SeasonPage() {
         // If teams are in the same range, use range color
         if (rowRange !== undefined && rowRange === colRange) {
             const color = rangeColors[rowRange];
+            if (!color) return { backgroundColor: "transparent" };
             return { backgroundColor: color };
         }
 
         // Otherwise, no color
-        return { backgroundColor: 'transparent' };
+        return { backgroundColor: "transparent" };
     };
 
     // Function to get header color style
@@ -1433,36 +1451,32 @@ export default function SeasonPage() {
                         <div className="text-xs text-muted-foreground">
                             <div className="mb-2">Цвета обозначают диапазоны силы команд (относительно самой сильной команды):</div>
                             <div className="flex flex-wrap gap-4">
-                                {(() => {
-                                    const strengths = Array.from(strengthMap.values());
-                                    if (strengths.length === 0) return null;
+                                {rangeColors.map((color, index) => {
+                                    const rangeStart =
+                                        strengthRangeMax - (index + 1) * STRENGTH_RANGE_BAND;
+                                    const rangeEnd =
+                                        strengthRangeMax - index * STRENGTH_RANGE_BAND;
 
-                                    const maxStrength = Math.max(...strengths);
+                                    // Only show ranges that are actually used
+                                    const hasTeamsInRange = Array.from(
+                                        teamStrengthRanges.values(),
+                                    ).includes(index);
+                                    if (!hasTeamsInRange) return null;
 
-                                    return rangeColors.map((color, index) => {
-                                        const rangeStart = maxStrength - (index + 1) * 5;
-                                        const rangeEnd = maxStrength - index * 5;
-
-                                        // Only show ranges that are actually used
-                                        const hasTeamsInRange = Array.from(teamStrengthRanges.values()).includes(index);
-                                        if (!hasTeamsInRange) return null;
-
-                                        return (
-                                            <div key={index} className="flex items-center gap-2">
-                                                <div
-                                                    className="w-4 h-4 rounded"
-                                                    style={{ backgroundColor: color }}
-                                                ></div>
-                                                <span>
-                                                    {index === 0
-                                                        ? `0-5% (${rangeEnd.toFixed(1)}-${maxStrength.toFixed(1)}%)`
-                                                        : `${index * 5}-${(index + 1) * 5}% (${rangeStart.toFixed(1)}-${rangeEnd.toFixed(1)}%)`
-                                                    }
-                                                </span>
-                                            </div>
-                                        );
-                                    });
-                                })()}
+                                    return (
+                                        <div key={index} className="flex items-center gap-2">
+                                            <div
+                                                className="w-4 h-4 rounded"
+                                                style={{ backgroundColor: color }}
+                                            ></div>
+                                            <span>
+                                                {index === 0
+                                                    ? `0-${STRENGTH_RANGE_BAND}% (${rangeEnd.toFixed(1)}-${strengthRangeMax.toFixed(1)}%)`
+                                                    : `${index * STRENGTH_RANGE_BAND}-${(index + 1) * STRENGTH_RANGE_BAND}% (${rangeStart.toFixed(1)}-${rangeEnd.toFixed(1)}%)`}
+                                            </span>
+                                        </div>
+                                    );
+                                })}
                             </div>
                         </div>
 
