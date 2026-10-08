@@ -60,30 +60,34 @@ function localDateToIso(dateStr: string) {
 
 const STRENGTH_RANGE_BAND = 5;
 
-/** Base palette for 5% strength bands (strongest → weaker). */
-const BASE_RANGE_COLORS = [
-    "rgba(37, 99, 235, 0.6)", // синий — 0–5%
-    "rgba(220, 38, 38, 0.6)", // красный — 5–10%
-    "rgba(147, 51, 234, 0.6)", // фиолетовый — 10–15%
-    "rgba(234, 88, 12, 0.6)", // оранжевый — 15–20%
-    "rgba(234, 179, 8, 0.6)", // желтый — 20–25%
-    "rgba(6, 182, 212, 0.6)", // циан — 25–30%
-    "rgba(132, 204, 22, 0.6)", // лайм — 30–35%
-    "rgba(236, 72, 153, 0.6)", // розовый — 35–40%
-    "rgba(99, 102, 241, 0.6)", // индиго — 40–45%
-    "rgba(190, 24, 93, 0.6)", // малиновый — 45–50%
-    "rgba(14, 165, 233, 0.6)", // sky — 50–55%
-    "rgba(180, 83, 9, 0.6)", // коричнево-оранжевый — 55–60%
-    "rgba(22, 163, 74, 0.6)", // зелёный — 60–65%
-    "rgba(124, 58, 237, 0.6)", // фиолетовый-2 — 65–70%
-    "rgba(244, 63, 94, 0.6)", // rose — 70–75%
-    "rgba(8, 145, 178, 0.6)", // teal — 75–80%
-];
+function lerp(a: number, b: number, t: number) {
+    return a + (b - a) * t;
+}
 
-function colorForRangeIndex(index: number): string {
-    if (index < BASE_RANGE_COLORS.length) return BASE_RANGE_COLORS[index];
-    const hue = (index * 47) % 360;
-    return `hsla(${hue}, 72%, 45%, 0.6)`;
+/**
+ * Strength bands: strongest → weakest.
+ * First half — red (dark → light), second half — blue (light → dark).
+ * Weakest band is the darkest blue.
+ */
+function colorForRangeIndex(index: number, bandCount: number): string {
+    const alpha = 0.7;
+    const t = bandCount <= 1 ? 0 : index / (bandCount - 1);
+
+    if (t <= 0.5) {
+        // Dark red → light red
+        const u = t / 0.5;
+        const r = Math.round(lerp(127, 254, u));
+        const g = Math.round(lerp(29, 202, u));
+        const b = Math.round(lerp(29, 202, u));
+        return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+    }
+
+    // Light blue → dark blue
+    const u = (t - 0.5) / 0.5;
+    const r = Math.round(lerp(186, 30, u));
+    const g = Math.round(lerp(230, 64, u));
+    const b = Math.round(lerp(253, 175, u));
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
 export default function SeasonPage() {
@@ -555,7 +559,9 @@ export default function SeasonPage() {
         const maxDiff = Math.max(0, maxStrength - minStrength);
         const bandCount = Math.max(1, Math.ceil(maxDiff / STRENGTH_RANGE_BAND) || 1);
 
-        const colors = Array.from({ length: bandCount }, (_, i) => colorForRangeIndex(i));
+        const colors = Array.from({ length: bandCount }, (_, i) =>
+            colorForRangeIndex(i, bandCount),
+        );
         const ranges = new Map<string, number>();
 
         strengthMap.forEach((strength, teamId) => {
