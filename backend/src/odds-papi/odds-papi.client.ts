@@ -341,8 +341,25 @@ export class OddsPapiClient {
       this.logger.error(
         `OddsPapi /historical-odds failed: ${res.status} ${body.slice(0, 500)}`,
       );
+      let detail = '';
+      try {
+        const parsed = JSON.parse(body) as {
+          error?: { code?: string; message?: string; details?: string };
+          code?: string;
+          message?: string;
+        };
+        const err = parsed?.error ?? parsed;
+        const code = err?.code;
+        const message = err?.message;
+        const details = (err as { details?: string })?.details;
+        detail = [code, message, details].filter(Boolean).join(' — ');
+      } catch {
+        // ignore parse errors
+      }
       throw new ServiceUnavailableException(
-        `OddsPapi request failed (${res.status}) for /historical-odds`,
+        detail
+          ? `OddsPapi request failed (${res.status}) for /historical-odds: ${detail}`
+          : `OddsPapi request failed (${res.status}) for /historical-odds`,
       );
     }
 

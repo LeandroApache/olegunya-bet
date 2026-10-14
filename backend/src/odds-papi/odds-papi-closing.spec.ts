@@ -1,5 +1,8 @@
 import { extractPinnacleClosingOneXTwo, closingPrice } from './odds-papi-closing';
-import { getOddsPapiSportConfig } from './odds-papi.sport-config';
+import {
+  getOddsPapiSportConfig,
+  ODDSPAPI_BOOKMAKER_PINNACLE,
+} from './odds-papi.sport-config';
 import { SportKey } from '../../generated/prisma';
 import { OddsPapiHistoricalOddsResponse } from './odds-papi.types';
 
@@ -7,7 +10,7 @@ function hist(marketId: string, outcomes: Record<string, any>): OddsPapiHistoric
   return {
     fixtureId: 'x',
     bookmakers: {
-      pinnacle: {
+      [ODDSPAPI_BOOKMAKER_PINNACLE]: {
         markets: {
           [marketId]: { outcomes },
         },
@@ -65,7 +68,7 @@ describe('extractPinnacleClosingOneXTwo', () => {
       },
     });
     // Football market present but must be ignored for hockey config
-    (data.bookmakers.pinnacle.markets as any)['101'] = {
+    (data.bookmakers[ODDSPAPI_BOOKMAKER_PINNACLE].markets as any)['101'] = {
       outcomes: {
         '101': { players: { '0': [{ createdAt: '2026-09-30T15:40:00.000Z', price: 9.99, active: true }] } },
         '102': { players: { '0': [{ createdAt: '2026-09-30T15:40:00.000Z', price: 9.99, active: true }] } },

@@ -8,6 +8,9 @@ Automates finished-fixture import into existing `Match` / `MatchComputed` using 
 
 ```bash
 ODDSPAPI_API_KEY=...
+# Optional — must match a bookmaker key on your OddsPapi subscription.
+# Default: pinnacle+30 (common on "normal" plans). Plain "pinnacle" returns 403 RESTRICTED_ACCESS if not entitled.
+# ODDSPAPI_BOOKMAKER=pinnacle+30
 ```
 
 Never expose the key to the frontend.

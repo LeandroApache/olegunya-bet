@@ -4,6 +4,7 @@ import {
   distanceFromEvenMoney,
   selectMainTotalLine,
 } from './odds-papi-total-selector';
+import { ODDSPAPI_BOOKMAKER_PINNACLE } from './odds-papi.sport-config';
 import { OddsPapiHistoricalOddsResponse, OddsPapiMarketDefinition } from './odds-papi.types';
 
 function market(line: number, marketId: number, overId: number, underId: number): OddsPapiMarketDefinition {
@@ -27,7 +28,7 @@ function hist(markets: Record<string, any>): OddsPapiHistoricalOddsResponse {
   return {
     fixtureId: 'test',
     bookmakers: {
-      pinnacle: { markets },
+      [ODDSPAPI_BOOKMAKER_PINNACLE]: { markets },
     },
   };
 }

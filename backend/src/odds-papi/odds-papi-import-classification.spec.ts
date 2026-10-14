@@ -5,6 +5,7 @@ import {
   OddsPapiHistoricalOddsNotFoundError,
 } from './odds-papi.client';
 import { OddsPapiService } from './odds-papi.service';
+import { ODDSPAPI_BOOKMAKER_PINNACLE } from './odds-papi.sport-config';
 import { SportKey } from '../../generated/prisma';
 import { ConfigService } from '@nestjs/config';
 
@@ -236,7 +237,7 @@ describe('OddsPapiService.importFixtures missing-odds classification', () => {
       getHistoricalOdds: jest.fn().mockResolvedValue({
         fixtureId: fixture.fixtureId,
         bookmakers: {
-          pinnacle: {
+          [ODDSPAPI_BOOKMAKER_PINNACLE]: {
             markets: {
               '153': {
                 outcomes: {

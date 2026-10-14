@@ -1,7 +1,12 @@
 import { SportKey } from '../../generated/prisma';
 
-/** Bookmaker slug used for closing lines. */
-export const ODDSPAPI_BOOKMAKER_PINNACLE = 'pinnacle';
+/**
+ * Bookmaker slug used for historical/closing lines.
+ * Active OddsPapi plans often expose `pinnacle+30` (delayed) rather than `pinnacle`.
+ * Override with ODDSPAPI_BOOKMAKER if the account uses a different slug.
+ */
+export const ODDSPAPI_BOOKMAKER_PINNACLE =
+  process.env.ODDSPAPI_BOOKMAKER?.trim() || 'pinnacle+30';
 
 export const ODDSPAPI_STATUS_FINISHED = 2;
 
